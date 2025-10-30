@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wizard Battle</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tone@14.8.39/build/Tone.min.js"></script>
+</head>
+<body>
+    <!-- Menu Screen -->
+    <div id="menuScreen" class="menu-screen">
+        <div class="scanlines"></div>
+        <div class="menu-container">
+            <img src="assets/release.png" alt="Game Logo" class="splash-logo">
+            
+            <div class="menu-buttons">
+                <button class="btn" id="playBtn">▶ FIND MATCH</button>
+                <button class="btn" id="createRoomBtn">➕ CREATE ROOM</button>
+                <button class="btn" id="joinRoomBtn">🔍 JOIN ROOM</button>
+                <button class="btn" id="settingsBtn">⚙ SETTINGS</button>
+            </div>
+
+            <div class="info-text">
+                > Use A/D or ←/→ to move, W or ↑ to jump<br>
+                > Hold W on walls to climb • Click to shoot
+            </div>
+            
+            <div class="credit-text">An indie game by Billy Murrin</div>
+        </div>
+
+        <!-- Create Room Panel -->
+        <div class="panel" id="createRoomPanel">
+            <div class="panel-content">
+                <div class="panel-title">➕ CREATE ROOM</div>
+                <div class="input-group">
+                    <label>Room Name:</label>
+                    <input type="text" id="createRoomName" placeholder="Enter room name..." maxlength="20" autocomplete="off">
+                </div>
+                <div class="panel-buttons">
+                    <button class="btn" id="confirmCreateBtn">✓ CREATE</button>
+                    <button class="btn" id="cancelCreateBtn">✕ CANCEL</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Join Room Panel -->
+        <div class="panel" id="joinRoomPanel">
+            <div class="panel-content">
+                <div class="panel-title">🔍 JOIN ROOM</div>
+                <div class="room-list-container">
+                    <div class="recent-rooms">
+                        <label>Recent Rooms:</label>
+                        <div id="recentRoomsList" class="room-list"></div>
+                    </div>
+                    <div class="input-group">
+                        <label>Or Enter Room Name:</label>
+                        <input type="text" id="joinRoomName" placeholder="Type room name..." maxlength="20" autocomplete="off">
+                    </div>
+                </div>
+                <div class="panel-buttons">
+                    <button class="btn" id="confirmJoinBtn">✓ JOIN</button>
+                    <button class="btn" id="cancelJoinBtn">✕ CANCEL</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Panel -->
+        <div class="panel" id="settingsPanel">
+            <div class="panel-content">
+                <div class="panel-title">⚙ SETTINGS</div>
+                <div class="setting-item">
+                    <label>🔊 Master Volume</label>
+                    <div class="setting-control">
+                        <input type="range" id="masterVolume" min="0" max="100" value="70">
+                        <span class="volume-value" id="volumeValue">70%</span>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>🎵 Music Volume</label>
+                    <div class="setting-control">
+                        <input type="range" id="musicVolume" min="0" max="100" value="60">
+                        <span class="volume-value" id="musicVolumeValue">60%</span>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>🔉 SFX Volume</label>
+                    <div class="setting-control">
+                        <input type="range" id="sfxVolume" min="0" max="100" value="80">
+                        <span class="volume-value" id="sfxVolumeValue">80%</span>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>🎵 Background Music</label>
+                    <div class="setting-control">
+                        <div class="toggle-switch on" id="musicToggle"></div>
+                    </div>
+                </div>
+                <div class="panel-buttons">
+                    <button class="btn" id="applySettingsBtn">✓ APPLY</button>
+                    <button class="btn" id="closeSettingsBtn">✕ CLOSE</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="version">v1.0 RETRO</div>
+        <audio id="bgMusic" loop>
+            <source src="assets/ws1theme.mp3" type="audio/mpeg">
+        </audio>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="gameScreen" class="game-screen" style="display: none;">
+        <div id="ui">Room: <span id="currentRoomName">-</span> | Players: <span id="pc">1</span></div>
+        <div id="info">Players: <span id="pc2">1</span><br>Use A/D or ←/→ to move, W or ↑ to jump (hold W on a wall to climb)</div>
+        <div id="activeUps"></div>
+        <div id="cooldownBar">
+            <div id="cooldownLabel">MANA CHARGE</div>
+            <div id="cooldownFill"></div>
+        </div>
+        <button id="leaveGameBtn" class="leave-btn">← LEAVE GAME</button>
+        <button id="unstuckBtn" class="unstuck-btn">UNSTUCK</button>
+        <audio id="battleMusic" loop>
+            <source src="assets/ws1battle.mp3" type="audio/mpeg">
+        </audio>
+    </div>
+
+    <script type="module">
+        import * as Trystero from 'https://cdn.jsdelivr.net/npm/trystero@0.15.1/+esm';
+        window.trystero = Trystero;
+        window.trysteroLoaded = true;
+        console.log('✓ Trystero loaded');
+    </script>
+
+    <!-- Developer Console -->
+    <div id="devConsole" class="dev-console hidden">
+        <div class="console-header">
+            <span>Developer Console</span>
+            <button class="console-close" onclick="window.closeConsole()">×</button>
+        </div>
+        <div class="console-output" id="consoleOutput"></div>
+        <div class="console-input-wrapper">
+            <span class="console-prompt">></span>
+            <input type="text" id="consoleInput" class="console-input" autocomplete="off" spellcheck="false">
+        </div>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+    <script src="js/menu.js"></script>
+</body>
+</html>
