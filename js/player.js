@@ -47,7 +47,7 @@ export function findSafeSpawnLocation(world, players) {
     return { x: V_W / 2, y: V_H / 2 };
 }
 
-export function addPlayer(world, players, playerCountElement, id, x, y, col) {
+export function addPlayer(world, players, playerCountElement, id, x, y, col, name) {
     const body = Matter.Bodies.circle(x, y, PR, {
         restitution: 0,
         friction: 0.9,
@@ -58,13 +58,19 @@ export function addPlayer(world, players, playerCountElement, id, x, y, col) {
     players[id] = {
         body,
         color: col || randNeon(),
+        name: name || `Player${id.substring(0, 4)}`,
         dir: 1,
         ang: 0,
         onWall: false,
         wallSide: 0,
         activePowerUps: {},  // per-player power-ups
         health: PLAYER_CFG.maxHealth,
-        maxHealth: PLAYER_CFG.maxHealth
+        maxHealth: PLAYER_CFG.maxHealth,
+        isCrouching: false,
+        originalRadius: PR,
+        currentScale: 1.0,
+        kills: 0,
+        deaths: 0
     };
     Matter.World.add(world, body);
     if (playerCountElement) {
@@ -97,12 +103,21 @@ export function unstuckPlayer(world, players, playerId) {
     Matter.Body.setVelocity(p.body, { x: 0, y: 0 });
 }
 
-export function damagePlayer(players, playerId, damage, world, myId, updateActiveUI) {
+export function damagePlayer(players, playerId, damage, world, attackerId, myId, updateActiveUI) {
     if (!players[playerId]) return;
+    const wasAlive = players[playerId].health > 0;
     players[playerId].health = Math.max(0, players[playerId].health - damage);
     
     // Respawn if dead
-    if (players[playerId].health <= 0) {
+    if (players[playerId].health <= 0 && wasAlive) {
+        // Increment deaths for the player who died
+        players[playerId].deaths = (players[playerId].deaths || 0) + 1;
+        
+        // Increment kills for the attacker (if attacker exists and is not the same player)
+        if (attackerId && attackerId !== playerId && players[attackerId]) {
+            players[attackerId].kills = (players[attackerId].kills || 0) + 1;
+        }
+        
         respawnPlayer(world, players, playerId, myId, updateActiveUI);
     }
 }

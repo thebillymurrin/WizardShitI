@@ -2,10 +2,18 @@
 
 // Settings management
 const settings = {
-    masterVolume: parseInt(localStorage.getItem('masterVolume') || '70'),
     musicVolume: parseInt(localStorage.getItem('musicVolume') || '60'),
     sfxVolume: parseInt(localStorage.getItem('sfxVolume') || '80'),
-    musicEnabled: localStorage.getItem('musicEnabled') !== 'false'
+    // Keybinds
+    keybindMoveLeft: localStorage.getItem('keybindMoveLeft') || 'a',
+    keybindMoveRight: localStorage.getItem('keybindMoveRight') || 'd',
+    keybindJump: localStorage.getItem('keybindJump') || ' ',
+    keybindCrouch: localStorage.getItem('keybindCrouch') || 'control',
+    keybindClimb: localStorage.getItem('keybindClimb') || 'w',
+    // Particle settings
+    enableParticles: localStorage.getItem('enableParticles') !== 'false', // Default to true
+    maxParticles: parseInt(localStorage.getItem('maxParticles') || '50'),
+    particleDuration: parseFloat(localStorage.getItem('particleDuration') || '3.0')
 };
 
 // Recent rooms management
@@ -32,6 +40,8 @@ function addRecentRoom(roomName) {
 
 function updateRecentRoomsList() {
     const list = document.getElementById('recentRoomsList');
+    if (!list) return; // Element doesn't exist, skip
+    
     const rooms = getRecentRooms();
     
     list.innerHTML = '';
@@ -47,7 +57,10 @@ function updateRecentRoomsList() {
             item.className = 'room-item';
             item.textContent = `> ${roomName}`;
             item.addEventListener('click', () => {
-                document.getElementById('joinRoomName').value = roomName;
+                const joinRoomInput = document.getElementById('joinRoomName');
+                if (joinRoomInput) {
+                    joinRoomInput.value = roomName;
+                }
             });
             list.appendChild(item);
         });
@@ -61,77 +74,165 @@ document.addEventListener('DOMContentLoaded', () => {
     const bgMusic = document.getElementById('bgMusic');
     
     const playBtn = document.getElementById('playBtn');
-    const createRoomBtn = document.getElementById('createRoomBtn');
     const joinRoomBtn = document.getElementById('joinRoomBtn');
     const settingsBtn = document.getElementById('settingsBtn');
     
-    const createRoomPanel = document.getElementById('createRoomPanel');
-    const joinRoomPanel = document.getElementById('joinRoomPanel');
     const settingsPanel = document.getElementById('settingsPanel');
-    
-    const confirmCreateBtn = document.getElementById('confirmCreateBtn');
-    const cancelCreateBtn = document.getElementById('cancelCreateBtn');
-    const confirmJoinBtn = document.getElementById('confirmJoinBtn');
-    const cancelJoinBtn = document.getElementById('cancelJoinBtn');
     const applySettingsBtn = document.getElementById('applySettingsBtn');
     const closeSettingsBtn = document.getElementById('closeSettingsBtn');
     
-    const createRoomNameInput = document.getElementById('createRoomName');
     const joinRoomNameInput = document.getElementById('joinRoomName');
+    const playerNameInput = document.getElementById('playerNameInput');
     
-    // Update recent rooms list
+    // Convert player name input to uppercase as user types
+    if (playerNameInput) {
+        playerNameInput.addEventListener('input', (e) => {
+            e.target.value = e.target.value.toUpperCase();
+        });
+    }
+    
+    // Convert room name input to uppercase as user types
+    if (joinRoomNameInput) {
+        joinRoomNameInput.addEventListener('input', (e) => {
+            e.target.value = e.target.value.toUpperCase();
+        });
+    }
+    
+    // Update recent rooms list (if element exists)
     updateRecentRoomsList();
     
     // Initialize settings UI
     function initSettings() {
-        const masterVolumeSlider = document.getElementById('masterVolume');
         const musicVolumeSlider = document.getElementById('musicVolume');
         const sfxVolumeSlider = document.getElementById('sfxVolume');
-        const musicToggle = document.getElementById('musicToggle');
-        const volumeValue = document.getElementById('volumeValue');
         const musicVolumeValue = document.getElementById('musicVolumeValue');
         const sfxVolumeValue = document.getElementById('sfxVolumeValue');
         
-        masterVolumeSlider.value = settings.masterVolume;
         musicVolumeSlider.value = settings.musicVolume;
         sfxVolumeSlider.value = settings.sfxVolume;
-        volumeValue.textContent = settings.masterVolume + '%';
         musicVolumeValue.textContent = settings.musicVolume + '%';
         sfxVolumeValue.textContent = settings.sfxVolume + '%';
         
-        if (settings.musicEnabled) {
-            musicToggle.classList.add('on');
+        // Initialize keybinds
+        const keybindMoveLeft = document.getElementById('keybindMoveLeft');
+        const keybindMoveRight = document.getElementById('keybindMoveRight');
+        const keybindJump = document.getElementById('keybindJump');
+        const keybindCrouch = document.getElementById('keybindCrouch');
+        const keybindClimb = document.getElementById('keybindClimb');
+        
+        keybindMoveLeft.value = settings.keybindMoveLeft === ' ' ? 'Space' : settings.keybindMoveLeft.toUpperCase();
+        keybindMoveRight.value = settings.keybindMoveRight === ' ' ? 'Space' : settings.keybindMoveRight.toUpperCase();
+        keybindJump.value = settings.keybindJump === ' ' ? 'Space' : settings.keybindJump.toUpperCase();
+        keybindCrouch.value = settings.keybindCrouch === 'control' ? 'Ctrl' : settings.keybindCrouch.toUpperCase();
+        keybindClimb.value = settings.keybindClimb === ' ' ? 'Space' : settings.keybindClimb.toUpperCase();
+        
+        // Initialize particle settings
+        const enableParticlesToggle = document.getElementById('enableParticlesToggle');
+        const maxParticlesSlider = document.getElementById('maxParticles');
+        const maxParticlesValue = document.getElementById('maxParticlesValue');
+        const particleDurationSlider = document.getElementById('particleDuration');
+        const particleDurationValue = document.getElementById('particleDurationValue');
+        
+        maxParticlesSlider.value = settings.maxParticles;
+        maxParticlesValue.textContent = settings.maxParticles;
+        particleDurationSlider.value = settings.particleDuration;
+        particleDurationValue.textContent = settings.particleDuration.toFixed(1) + 'x';
+        
+        // Particles enabled by default
+        if (settings.enableParticles) {
+            enableParticlesToggle.classList.add('on');
         } else {
-            musicToggle.classList.remove('on');
+            enableParticlesToggle.classList.remove('on');
         }
         
         updateBgMusicVolume();
+        updateSFXVolume();
+    }
+    
+    // Keybind input handler
+    function setupKeybindInput(inputId, settingKey) {
+        const input = document.getElementById(inputId);
+        let isListening = false;
+        
+        input.addEventListener('click', () => {
+            if (!isListening) {
+                isListening = true;
+                input.value = 'Press key...';
+                input.style.background = '#ff4444';
+                
+                const keyHandler = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    let keyValue = '';
+                    if (e.key === ' ') {
+                        keyValue = ' ';
+                        input.value = 'Space';
+                    } else if (e.key === 'Control' || e.ctrlKey) {
+                        keyValue = 'control';
+                        input.value = 'Ctrl';
+                    } else if (e.key.length === 1) {
+                        keyValue = e.key.toLowerCase();
+                        input.value = e.key.toUpperCase();
+                    } else if (e.key.toLowerCase().startsWith('arrow')) {
+                        keyValue = e.key.toLowerCase();
+                        input.value = e.key.replace('Arrow', '→');
+                    } else {
+                        keyValue = e.key.toLowerCase();
+                        input.value = e.key;
+                    }
+                    
+                    settings[settingKey] = keyValue;
+                    input.style.background = '';
+                    isListening = false;
+                    
+                    window.removeEventListener('keydown', keyHandler);
+                };
+                
+                window.addEventListener('keydown', keyHandler, { once: true });
+            }
+        });
     }
     
     // Update background music volume
     function updateBgMusicVolume() {
-        const masterVolumeSlider = document.getElementById('masterVolume');
         const musicVolumeSlider = document.getElementById('musicVolume');
-        const masterVol = parseInt(masterVolumeSlider.value) / 100;
         const musicVol = parseInt(musicVolumeSlider.value) / 100;
-        const targetVolume = masterVol * musicVol;
         
-        // Update both theme and battle music volumes
+        // Update all music volumes
         if (bgMusic) {
-            bgMusic.volume = targetVolume;
+            bgMusic.volume = musicVol;
         }
         const battleMusic = document.getElementById('battleMusic');
         if (battleMusic && !battleMusic.paused) {
-            battleMusic.volume = targetVolume;
+            battleMusic.volume = musicVol;
+        }
+        const cloudsMusic = document.getElementById('cloudsMusic');
+        if (cloudsMusic && !cloudsMusic.paused) {
+            cloudsMusic.volume = musicVol;
+        }
+        const spaceMusic = document.getElementById('spaceMusic');
+        if (spaceMusic && !spaceMusic.paused) {
+            spaceMusic.volume = musicVol;
+        }
+        const lavaMusic = document.getElementById('lavaMusic');
+        if (lavaMusic && !lavaMusic.paused) {
+            lavaMusic.volume = musicVol;
+        }
+    }
+    
+    // Update SFX volume
+    function updateSFXVolume() {
+        const sfxVolumeSlider = document.getElementById('sfxVolume');
+        const sfxVol = parseInt(sfxVolumeSlider.value) / 100;
+        
+        // Update SFX volume in audio module
+        if (window.updateSFXVolume) {
+            window.updateSFXVolume(sfxVol);
         }
     }
     
     // Volume sliders
-    document.getElementById('masterVolume').addEventListener('input', (e) => {
-        document.getElementById('volumeValue').textContent = e.target.value + '%';
-        updateBgMusicVolume();
-    });
-    
     document.getElementById('musicVolume').addEventListener('input', (e) => {
         document.getElementById('musicVolumeValue').textContent = e.target.value + '%';
         updateBgMusicVolume();
@@ -139,60 +240,39 @@ document.addEventListener('DOMContentLoaded', () => {
     
     document.getElementById('sfxVolume').addEventListener('input', (e) => {
         document.getElementById('sfxVolumeValue').textContent = e.target.value + '%';
+        updateSFXVolume();
     });
     
     // Toggle switches
-    document.getElementById('musicToggle').addEventListener('click', function() {
+    document.getElementById('enableParticlesToggle').addEventListener('click', function() {
         this.classList.toggle('on');
     });
     
+    // Max particles slider
+    document.getElementById('maxParticles').addEventListener('input', (e) => {
+        document.getElementById('maxParticlesValue').textContent = e.target.value;
+    });
+    
+    // Particle duration slider
+    document.getElementById('particleDuration').addEventListener('input', (e) => {
+        document.getElementById('particleDurationValue').textContent = parseFloat(e.target.value).toFixed(1) + 'x';
+    });
+    
+    // Setup keybind inputs
+    setupKeybindInput('keybindMoveLeft', 'keybindMoveLeft');
+    setupKeybindInput('keybindMoveRight', 'keybindMoveRight');
+    setupKeybindInput('keybindJump', 'keybindJump');
+    setupKeybindInput('keybindCrouch', 'keybindCrouch');
+    setupKeybindInput('keybindClimb', 'keybindClimb');
+    
     // Button handlers
     playBtn.addEventListener('click', () => {
-        // Quick match - generate random room name
+        // Join any match - generate random room name
         const randomRoom = 'match' + Math.random().toString(36).substr(2, 6);
         startGame(randomRoom);
     });
     
-    createRoomBtn.addEventListener('click', () => {
-        createRoomPanel.classList.add('active');
-        createRoomNameInput.focus();
-    });
-    
     joinRoomBtn.addEventListener('click', () => {
-        joinRoomPanel.classList.add('active');
-        updateRecentRoomsList();
-        joinRoomNameInput.focus();
-    });
-    
-    settingsBtn.addEventListener('click', () => {
-        settingsPanel.classList.add('active');
-    });
-    
-    // Panel close handlers
-    cancelCreateBtn.addEventListener('click', () => {
-        createRoomPanel.classList.remove('active');
-        createRoomNameInput.value = '';
-    });
-    
-    cancelJoinBtn.addEventListener('click', () => {
-        joinRoomPanel.classList.remove('active');
-        joinRoomNameInput.value = '';
-    });
-    
-    closeSettingsBtn.addEventListener('click', () => {
-        settingsPanel.classList.remove('active');
-    });
-    
-    // Confirm handlers
-    confirmCreateBtn.addEventListener('click', () => {
-        const roomName = createRoomNameInput.value.trim();
-        if (roomName) {
-            addRecentRoom(roomName);
-            startGame(roomName);
-        }
-    });
-    
-    confirmJoinBtn.addEventListener('click', () => {
         const roomName = joinRoomNameInput.value.trim();
         if (roomName) {
             addRecentRoom(roomName);
@@ -200,45 +280,76 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-    // Enter key handlers
-    createRoomNameInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            confirmCreateBtn.click();
-        }
+    // Allow Enter key to join room
+    if (joinRoomNameInput) {
+        joinRoomNameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                joinRoomBtn.click();
+            }
+        });
+    }
+    
+    settingsBtn.addEventListener('click', () => {
+        settingsPanel.classList.add('active');
     });
     
-    joinRoomNameInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            confirmJoinBtn.click();
-        }
+    closeSettingsBtn.addEventListener('click', () => {
+        settingsPanel.classList.remove('active');
     });
     
     // Apply settings
     applySettingsBtn.addEventListener('click', () => {
-        const masterVolumeSlider = document.getElementById('masterVolume');
         const musicVolumeSlider = document.getElementById('musicVolume');
         const sfxVolumeSlider = document.getElementById('sfxVolume');
-        const musicToggle = document.getElementById('musicToggle');
+        const enableParticlesToggle = document.getElementById('enableParticlesToggle');
+        const maxParticlesSlider = document.getElementById('maxParticles');
+        const particleDurationSlider = document.getElementById('particleDuration');
         
-        settings.masterVolume = parseInt(masterVolumeSlider.value);
         settings.musicVolume = parseInt(musicVolumeSlider.value);
         settings.sfxVolume = parseInt(sfxVolumeSlider.value);
-        settings.musicEnabled = musicToggle.classList.contains('on');
+        settings.enableParticles = enableParticlesToggle.classList.contains('on');
+        settings.maxParticles = parseInt(maxParticlesSlider.value);
+        settings.particleDuration = parseFloat(particleDurationSlider.value);
         
-        localStorage.setItem('masterVolume', settings.masterVolume);
         localStorage.setItem('musicVolume', settings.musicVolume);
         localStorage.setItem('sfxVolume', settings.sfxVolume);
-        localStorage.setItem('musicEnabled', settings.musicEnabled);
+        localStorage.setItem('keybindMoveLeft', settings.keybindMoveLeft);
+        localStorage.setItem('keybindMoveRight', settings.keybindMoveRight);
+        localStorage.setItem('keybindJump', settings.keybindJump);
+        localStorage.setItem('keybindCrouch', settings.keybindCrouch);
+        localStorage.setItem('keybindClimb', settings.keybindClimb);
+        localStorage.setItem('enableParticles', settings.enableParticles);
+        localStorage.setItem('maxParticles', settings.maxParticles);
+        localStorage.setItem('particleDuration', settings.particleDuration);
+        
+        // Update global settings for game to use
+        if (window.gameSettings) {
+            window.gameSettings = settings;
+        }
+        
+        // Update KEYBINDS and PARTICLE_SETTINGS in config
+        if (window.updateGameConfig) {
+            window.updateGameConfig();
+        }
         
         updateBgMusicVolume();
-        if (settings.musicEnabled && bgMusic.paused) {
+        updateSFXVolume();
+        
+        // Always play music if enabled (no toggle anymore)
+        if (bgMusic && bgMusic.paused) {
             bgMusic.play().catch(() => {});
-        } else if (!settings.musicEnabled && !bgMusic.paused) {
-            bgMusic.pause();
         }
         
         settingsPanel.classList.remove('active');
     });
+    
+    // Expose settings globally
+    window.gameSettings = settings;
+    
+    // Load settings into config on startup
+    if (window.updateGameConfig) {
+        window.updateGameConfig();
+    }
     
     // Start game function
     function startGame(roomName) {
@@ -248,45 +359,68 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update room name display
         document.getElementById('currentRoomName').textContent = roomName;
         
-        // Switch to battle music
+        // Detect theme from room name to determine which music to play
+        const roomLower = roomName.toLowerCase();
+        let theme = 'default';
+        if (roomLower.includes('clouds')) {
+            theme = 'clouds';
+        } else if (roomLower.includes('volcano') || roomLower.includes('lava') || roomLower.includes('fire')) {
+            theme = 'volcano';
+        } else if (roomLower.includes('space') || roomLower.includes('cosmic') || roomLower.includes('stars')) {
+            theme = 'space';
+        }
+        
+        // Switch to appropriate battle music based on theme
         const bgMusic = document.getElementById('bgMusic');
         const battleMusic = document.getElementById('battleMusic');
+        const cloudsMusic = document.getElementById('cloudsMusic');
+        const spaceMusic = document.getElementById('spaceMusic');
+        const lavaMusic = document.getElementById('lavaMusic');
         
-        if (bgMusic && battleMusic && settings.musicEnabled) {
-            // Fade out theme music
-            const fadeOut = setInterval(() => {
-                if (bgMusic.volume > 0.1) {
-                    bgMusic.volume -= 0.1;
-                } else {
-                    bgMusic.volume = 0;
-                    bgMusic.pause();
-                    clearInterval(fadeOut);
-                    
-                    // Start battle music with fade in
-                    battleMusic.volume = 0;
-                    battleMusic.currentTime = 0;
-                    battleMusic.play().catch(() => {});
-                    
-                    const fadeIn = setInterval(() => {
-                        const masterVol = parseInt(document.getElementById('masterVolume').value) / 100;
-                        const musicVol = parseInt(document.getElementById('musicVolume').value) / 100;
-                        const targetVolume = masterVol * musicVol;
-                        
-                        if (battleMusic.volume < targetVolume) {
-                            battleMusic.volume = Math.min(battleMusic.volume + 0.1, targetVolume);
-                        } else {
-                            clearInterval(fadeIn);
-                        }
-                    }, 50);
-                }
-            }, 50);
-        } else if (battleMusic && settings.musicEnabled) {
-            // Direct switch if fade not needed
-            const masterVol = parseInt(document.getElementById('masterVolume').value) / 100;
-            const musicVol = parseInt(document.getElementById('musicVolume').value) / 100;
-            battleMusic.volume = masterVol * musicVol;
+        if (bgMusic) {
+            // Stop and pause background music immediately
+            bgMusic.pause();
+            bgMusic.currentTime = 0;
+            bgMusic.volume = 0;
+        }
+        
+        // Stop all game music tracks first
+        if (battleMusic) {
+            battleMusic.pause();
             battleMusic.currentTime = 0;
-            battleMusic.play().catch(() => {});
+            battleMusic.volume = 0;
+        }
+        if (cloudsMusic) {
+            cloudsMusic.pause();
+            cloudsMusic.currentTime = 0;
+            cloudsMusic.volume = 0;
+        }
+        if (spaceMusic) {
+            spaceMusic.pause();
+            spaceMusic.currentTime = 0;
+            spaceMusic.volume = 0;
+        }
+        if (lavaMusic) {
+            lavaMusic.pause();
+            lavaMusic.currentTime = 0;
+            lavaMusic.volume = 0;
+        }
+        
+        // Start appropriate music based on theme
+        const musicVol = parseInt(document.getElementById('musicVolume').value) / 100;
+        let musicToPlay = battleMusic;
+        if (theme === 'clouds') {
+            musicToPlay = cloudsMusic;
+        } else if (theme === 'space') {
+            musicToPlay = spaceMusic;
+        } else if (theme === 'volcano') {
+            musicToPlay = lavaMusic;
+        }
+        
+        if (musicToPlay) {
+            musicToPlay.volume = musicVol;
+            musicToPlay.currentTime = 0;
+            musicToPlay.play().catch(() => {});
         }
         
         // Start the game with room name
@@ -311,34 +445,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Switch back to theme music
                 const bgMusic = document.getElementById('bgMusic');
                 const battleMusic = document.getElementById('battleMusic');
+                const cloudsMusic = document.getElementById('cloudsMusic');
+                const spaceMusic = document.getElementById('spaceMusic');
+                const lavaMusic = document.getElementById('lavaMusic');
                 
-                if (battleMusic && bgMusic && settings.musicEnabled) {
-                    // Fade out battle music
-                    const fadeOut = setInterval(() => {
-                        if (battleMusic.volume > 0.1) {
-                            battleMusic.volume -= 0.1;
-                        } else {
-                            battleMusic.volume = 0;
-                            battleMusic.pause();
-                            clearInterval(fadeOut);
-                            
-                            // Resume theme music with fade in
-                            const masterVol = parseInt(document.getElementById('masterVolume').value) / 100;
-                            const musicVol = parseInt(document.getElementById('musicVolume').value) / 100;
-                            bgMusic.volume = 0;
-                            bgMusic.currentTime = 0;
-                            bgMusic.play().catch(() => {});
-                            
-                            const fadeIn = setInterval(() => {
-                                const targetVolume = masterVol * musicVol;
-                                if (bgMusic.volume < targetVolume) {
-                                    bgMusic.volume = Math.min(bgMusic.volume + 0.1, targetVolume);
-                                } else {
-                                    clearInterval(fadeIn);
-                                }
-                            }, 50);
-                        }
-                    }, 50);
+                // Stop all game music tracks
+                if (battleMusic) {
+                    battleMusic.pause();
+                    battleMusic.currentTime = 0;
+                    battleMusic.volume = 0;
+                }
+                if (cloudsMusic) {
+                    cloudsMusic.pause();
+                    cloudsMusic.currentTime = 0;
+                    cloudsMusic.volume = 0;
+                }
+                if (spaceMusic) {
+                    spaceMusic.pause();
+                    spaceMusic.currentTime = 0;
+                    spaceMusic.volume = 0;
+                }
+                if (lavaMusic) {
+                    lavaMusic.pause();
+                    lavaMusic.currentTime = 0;
+                    lavaMusic.volume = 0;
+                }
+                
+                // Resume theme music
+                if (bgMusic) {
+                    const musicVol = parseInt(document.getElementById('musicVolume').value) / 100;
+                    bgMusic.volume = musicVol;
+                    bgMusic.currentTime = 0;
+                    bgMusic.play().catch(() => {});
                 }
                 
                 // Reset game state
@@ -355,9 +493,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Start background music
     function startMusic() {
-        if (settings.musicEnabled) {
-            bgMusic.play().catch(() => {});
-        }
+        bgMusic.play().catch(() => {});
     }
     
     // Initialize on first interaction

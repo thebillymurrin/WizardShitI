@@ -5,25 +5,29 @@ import { PLAYER_CFG } from './config.js';
 
 let jumpSynth, leadSynth, bassSynth;
 let toneStarted = false;
+let sfxGainNode = null;
 
 export function ensureToneStarted() {
     if (!toneStarted) {
+        // Create SFX gain node for volume control
+        sfxGainNode = new Tone.Gain(0.8).toDestination();
+        
         // Create synths on first user interaction
         jumpSynth = new Tone.MembraneSynth({
             pitch: "C2",
             envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.1 }
-        }).toDestination();
+        }).connect(sfxGainNode);
         
         leadSynth = new Tone.Synth({
             oscillator: { type: "square" },
             envelope: { attack: 0.01, decay: 0.08, sustain: 0, release: 0.08 }
-        }).toDestination();
+        }).connect(sfxGainNode);
         
         bassSynth = new Tone.Synth({
             oscillator: { type: "sawtooth" },
             envelope: { attack: 0.02, decay: 0.12, sustain: 0, release: 0.12 },
             filter: { type: "lowpass", rolloff: -12 }
-        }).toDestination();
+        }).connect(sfxGainNode);
         
         Tone.start().then(() => { toneStarted = true; });
     }
@@ -87,17 +91,34 @@ let explosionSynth, pickupSynth;
 export function initGameSounds() {
     if (!toneStarted) return;
     
+    // Ensure SFX gain node exists
+    if (!sfxGainNode) {
+        sfxGainNode = new Tone.Gain(0.8).toDestination();
+    }
+    
     // Explosion sound - low rumbling bass
     explosionSynth = new Tone.MembraneSynth({
         pitch: "C1",
         envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.4 }
-    }).toDestination();
+    }).connect(sfxGainNode);
     
     // Pickup sound - bright chime
     pickupSynth = new Tone.Synth({
         oscillator: { type: "triangle" },
         envelope: { attack: 0.01, decay: 0.1, sustain: 0.3, release: 0.2 }
-    }).toDestination();
+    }).connect(sfxGainNode);
+}
+
+// Update SFX volume (called from menu)
+export function updateSFXVolume(volume) {
+    if (sfxGainNode) {
+        sfxGainNode.gain.value = volume;
+    }
+}
+
+// Expose globally for menu to call
+if (typeof window !== 'undefined') {
+    window.updateSFXVolume = updateSFXVolume;
 }
 
 export function playExplosionSound() {

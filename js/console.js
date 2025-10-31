@@ -215,10 +215,32 @@ function executeCommand(command) {
                 break;
             }
             
+            case 'unstuck': {
+                if (!window.gameState || !window.gameState.players || !window.gameState.myId) {
+                    addOutput('Game not initialized or no local player found.', 'error');
+                    break;
+                }
+                
+                if (!window.gameState.players[window.gameState.myId]) {
+                    addOutput('Local player not found.', 'error');
+                    break;
+                }
+                
+                // Call unstuck function
+                if (window.unstuckPlayerFunction) {
+                    window.unstuckPlayerFunction();
+                    addOutput('Teleported to safe location', 'success');
+                } else {
+                    addOutput('Unstuck function not available.', 'error');
+                }
+                break;
+            }
+            
             case 'help':
             case '?': {
                 addOutput('Available commands:', 'info');
                 addOutput('  givepowerup <name> [playerId] - Give a power-up to a player', 'info');
+                addOutput('  unstuck - Teleport to a safe location', 'info');
                 addOutput('  help - Show this help message', 'info');
                 addOutput('  clear - Clear console output', 'info');
                 break;

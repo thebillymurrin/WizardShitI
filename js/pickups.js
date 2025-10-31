@@ -141,7 +141,7 @@ export function applyPickup(players, playerId, typeKey, myId, updateActiveUI) {
     const powerUps = players[playerId].activePowerUps;
     if (!powerUps[typeKey]) powerUps[typeKey] = { timer: 0, stacks: 0 };
     powerUps[typeKey].stacks++;
-    powerUps[typeKey].timer += 15_000;      // +15 s per pickup
+    powerUps[typeKey].timer += 30_000;      // +30 s per pickup (2x longer)
     if (playerId === myId && updateActiveUI) updateActiveUI();
 }
 

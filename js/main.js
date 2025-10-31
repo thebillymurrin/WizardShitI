@@ -8,8 +8,9 @@ import { render } from './graphics.js';
 import { startNetworking } from './networking.js';
 import { schedulePickupSpawns, updateActiveUI, collectPickup, applyPickup } from './pickups.js';
 import { damagePlayer, respawnPlayer, unstuckPlayer } from './player.js';
-import { POWERUP_TYPES, COLLISION_FILTERS } from './config.js';
+import { POWERUP_TYPES, COLLISION_FILTERS, VOXEL_CFG } from './config.js';
 import { initConsole, toggleConsole } from './console.js';
+import { destroyedVoxels, VOXEL_REGENERATION_TIME } from './physics.js';
 
 // Initialize canvas
 let canvas, ctx;
@@ -35,9 +36,14 @@ function resize() {
 // Initialize physics engine
 let engine, world;
 function initPhysics() {
+    if (typeof Matter === 'undefined') {
+        console.error('Matter.js is not loaded! Please check your internet connection or CDN.');
+        return false;
+    }
     engine = Matter.Engine.create();
     world = engine.world;
     world.gravity.y = 0.2;
+    return true;
 }
 
 // Game state
@@ -79,12 +85,30 @@ window.addEventListener('keydown', e => {
     // Don't process game keys if console is open
     if (!gameState.consoleOpen) {
         gameState.keys[e.key.toLowerCase()] = true;
+        // Handle Control key separately
+        if (e.ctrlKey) {
+            gameState.keys['control'] = true;
+        }
+        // Handle Space key
+        if (e.key === ' ') {
+            gameState.keys[' '] = true;
+            gameState.keys['space'] = true;
+        }
     }
 });
 window.addEventListener('keyup', e => {
     // Don't process game keys if console is open (except for backtick)
     if (!gameState.consoleOpen || e.key === '`' || e.key === '~') {
         gameState.keys[e.key.toLowerCase()] = false;
+        // Handle Control key separately
+        if (!e.ctrlKey) {
+            gameState.keys['control'] = false;
+        }
+        // Handle Space key
+        if (e.key === ' ') {
+            gameState.keys[' '] = false;
+            gameState.keys['space'] = false;
+        }
     }
 });
 
@@ -104,8 +128,8 @@ const updateActiveUIWrapper = () => {
     updateActiveUI(gameState.players, gameState.myId, activeUpsDiv, POWERUP_TYPES);
 };
 
-const damagePlayerWrapper = (players, playerId, damage, world, myId) => {
-    damagePlayer(players, playerId, damage, world, myId, updateActiveUIWrapper);
+const damagePlayerWrapper = (players, playerId, damage, world, attackerId, myId) => {
+    damagePlayer(players, playerId, damage, world, attackerId, myId, updateActiveUIWrapper);
 };
 
 const respawnPlayerWrapper = (world, players, playerId, myId) => {
@@ -239,10 +263,57 @@ window.receivePickupCollectedHandler = (data, peerId) => {
     applyPickup(gameState.players, data.playerId, data.typeKey, gameState.myId, updateActiveUIWrapper);
 };
 
+window.receiveVoxelDamageHandler = (data, peerId) => {
+    // Find the matching voxel by position and size
+    const voxel = world.bodies.find(body => {
+        if (!body.isVoxel || !body.voxelData) return false;
+        const vd = body.voxelData;
+        // Match by position and dimensions (with small tolerance for floating point)
+        return Math.abs(vd.x - data.x) < 1 && 
+               Math.abs(vd.y - data.y) < 1 && 
+               Math.abs(vd.width - data.width) < 1 && 
+               Math.abs(vd.height - data.height) < 1;
+    });
+    
+    if (voxel) {
+        // Apply damage without broadcasting (to avoid loop)
+        if (data.damage >= 9999) {
+            // Complete destruction
+            if (voxel.voxelData) {
+                destroyedVoxels.push({
+                    data: voxel.voxelData,
+                    regenerateTime: Date.now() + VOXEL_REGENERATION_TIME
+                });
+            }
+            Matter.World.remove(world, voxel);
+        } else {
+            // Partial damage
+            if (voxel.health === undefined) {
+                voxel.health = VOXEL_CFG.maxHealth;
+                voxel.maxHealth = VOXEL_CFG.maxHealth;
+            }
+            voxel.health -= data.damage;
+            if (voxel.health <= 0) {
+                // Destroy voxel
+                if (voxel.voxelData) {
+                    destroyedVoxels.push({
+                        data: voxel.voxelData,
+                        regenerateTime: Date.now() + VOXEL_REGENERATION_TIME
+                    });
+                }
+                Matter.World.remove(world, voxel);
+            }
+        }
+    }
+};
+
 // Main initialization - wait for DOM
 function initializeGame() {
     initCanvas();
-    initPhysics();
+    if (!initPhysics()) {
+        console.error('Failed to initialize physics engine. Matter.js may not be loaded.');
+        return;
+    }
     addMouseListeners();
     setupCollisionHandler(
         engine, world, gameState.players, gameState.orbs, gameState.particles,
@@ -260,15 +331,12 @@ function initializeGame() {
         applyPickup(players, playerId, typeKey, myId, updateActiveUIWrapper);
     };
     
-    // Setup unstuck button
-    const unstuckBtn = document.getElementById('unstuckBtn');
-    if (unstuckBtn) {
-        unstuckBtn.addEventListener('click', () => {
-            if (gameState.myId && gameState.players[gameState.myId]) {
-                unstuckPlayer(world, gameState.players, gameState.myId);
-            }
-        });
-    }
+    // Make unstuckPlayer available globally for console
+    window.unstuckPlayerFunction = () => {
+        if (gameState.myId && gameState.players[gameState.myId]) {
+            unstuckPlayer(world, gameState.players, gameState.myId);
+        }
+    };
 }
 
 // Wait for DOM to be ready

@@ -12,8 +12,8 @@ export const PLAYER_CFG = {
     /* Movement */
     force: 0.001,
     maxSpeed: 1.5,
-    jumpForce: 0.07,
-    climbForce: 0.01,
+    jumpForce: 0.01,
+    climbForce: 0.005,
 
     /* Weapon – base values (modified by power‑ups) */
     fireCooldown: 2.0,        // seconds between shots (base)
@@ -46,13 +46,14 @@ export const COLLISION = {
     PLAYER: 0x0001,
     ORB: 0x0002,
     WALL: 0x0004,
-    PICKUP: 0x0008
+    PICKUP: 0x0008,
+    PARTICLE: 0x0010
 };
 
 export const COLLISION_FILTERS = {
     wall: {
         category: COLLISION.WALL,
-        mask: COLLISION.PLAYER | COLLISION.WALL | COLLISION.PICKUP | COLLISION.ORB
+        mask: COLLISION.PLAYER | COLLISION.WALL | COLLISION.PICKUP | COLLISION.ORB | COLLISION.PARTICLE
     },
     player: {
         category: COLLISION.PLAYER,
@@ -65,6 +66,10 @@ export const COLLISION_FILTERS = {
     pickup: {
         category: COLLISION.PICKUP,
         mask: COLLISION.PLAYER | COLLISION.WALL | COLLISION.PICKUP | COLLISION.ORB
+    },
+    particle: {
+        category: COLLISION.PARTICLE,
+        mask: COLLISION.WALL  // Particles only collide with walls
     }
 };
 
@@ -247,5 +252,55 @@ export function setPlayerConfig(key, value) {
     } else {
         console.warn(`Unknown PLAYER_CFG key: ${key}`);
     }
+}
+
+// Keybinds configuration (defaults)
+export const KEYBINDS = {
+    moveLeft: 'a',
+    moveRight: 'd',
+    jump: ' ',
+    crouch: 'control',
+    climb: 'w'
+};
+
+// Particle settings
+export const PARTICLE_SETTINGS = {
+    simulateParticles: false,  // Default to false (disabled)
+    particleDuration: 3.0,  // multiplier for particle lifetime (max by default)
+    maxParticles: 50  // Maximum particles before removing oldest (for performance)
+};
+
+// Load keybinds from localStorage or use defaults
+export function loadKeybinds() {
+    if (typeof window !== 'undefined' && window.gameSettings) {
+        KEYBINDS.moveLeft = window.gameSettings.keybindMoveLeft || 'a';
+        KEYBINDS.moveRight = window.gameSettings.keybindMoveRight || 'd';
+        KEYBINDS.jump = window.gameSettings.keybindJump || ' ';
+        KEYBINDS.crouch = window.gameSettings.keybindCrouch || 'control';
+        KEYBINDS.climb = window.gameSettings.keybindClimb || 'w';
+    }
+}
+
+// Load particle settings from localStorage or use defaults
+export function loadParticleSettings() {
+    if (typeof window !== 'undefined' && window.gameSettings) {
+        // Check localStorage first, then window.gameSettings
+        const stored = localStorage.getItem('enableParticles');
+        if (stored !== null) {
+            PARTICLE_SETTINGS.simulateParticles = stored === 'true';
+        } else {
+            PARTICLE_SETTINGS.simulateParticles = window.gameSettings.enableParticles === true;
+        }
+        PARTICLE_SETTINGS.particleDuration = window.gameSettings.particleDuration || 3.0;
+        PARTICLE_SETTINGS.maxParticles = window.gameSettings.maxParticles || 50;
+    }
+}
+
+// Expose update function globally
+if (typeof window !== 'undefined') {
+    window.updateGameConfig = function() {
+        loadKeybinds();
+        loadParticleSettings();
+    };
 }
 

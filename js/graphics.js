@@ -20,7 +20,7 @@ const drawLimb = (c, x1, y1, x2, y2, w, col, leg) => {
     c.fillRect(Math.round(x2 - s / 2), Math.round(y2 - s / 2), s, s);
 };
 
-export function drawPixelWizard(c, x, y, s, f, col, vx, vy, wx, wy) {
+export function drawPixelWizard(c, x, y, s, f, col, vx, vy, wx, wy, isCrouching = false) {
     const ps = WIZARD_PIXEL_SIZE * s,
           bw = WIZARD_BODY[0].length * ps,
           bh = WIZARD_BODY.length * ps,
@@ -28,12 +28,55 @@ export function drawPixelWizard(c, x, y, s, f, col, vx, vy, wx, wy) {
           hy = y - bh * 0.15;
     const sw = Math.sin(animationFrame * 0.15) * Math.abs(vx),
           asw = Math.sin(animationFrame * 0.15 + Math.PI) * Math.abs(vx) * 5;
-    const lx = x - 6, rx = x + 6, fy = y + 18, sl = x - 8, sr = x + 8;
+    const lx = x - 6, rx = x + 6, fy = y + 18, sl = x - 8, sr = x + 8; // fy is ground level (feet position)
+    
+    // Crouch visual - move body down, scrunch legs only
+    const crouchBodyOffset = isCrouching ? 8 : 0; // Move body sprite down a bit when crouching
+    
+    // Feet must stay at the SAME absolute ground level (fy) regardless of crouching
+    // When body moves down, legs extend upward to compensate
+    const actualFeetY = fy; // Always use original ground level
+    
     c.save();
-    drawLimb(c, lx, hy, lx + sw * 6, fy, 5, col, 1);
-    drawLimb(c, rx, hy, rx - sw * 6, fy, 5, col, 1);
-    drawLimb(c, f ? sr : sl, sy, (f ? sr : sl) + asw, sy + 15, 4, col, 0);
-    c.translate(x, y);
+    // Legs - scrunch when crouching (compress vertically, keep feet at ground level)
+    if (isCrouching) {
+        // Keep feet at original ground level (fy), compress legs upward
+        const legCompression = 0.5;
+        const originalLegHeight = fy - hy; // Original leg height (from hip to feet)
+        const crouchedHipY = hy + crouchBodyOffset; // Hip position when crouching (moved down)
+        const crouchedLegHeight = actualFeetY - crouchedHipY; // Actual leg height needed
+        
+        // Note: drawLimb draws a foot at (x2, y2) with size s = w+4 = 9, so it extends s/2 = 4.5 below y2
+        // We want the bottom of the foot to be at ground level (fy)
+        // So we anchor at fy - s/2, then y2=0 means foot center is at fy - s/2, bottom is at fy
+        const footSize = 5 + 4; // w=5 for legs, plus 4 = 9 total foot size
+        const footOffset = footSize / 2; // 4.5 pixels - half foot extends below center
+        
+        // Left leg - scrunched, feet stay at actualFeetY (ground level)
+        c.save();
+        c.translate(lx, actualFeetY - footOffset); // Anchor so foot bottom aligns with ground
+        c.scale(1, legCompression); // Compress vertically upward from feet
+        // Draw leg from hip position (negative Y) to feet (0)
+        const hipOffset = -(crouchedLegHeight / legCompression);
+        drawLimb(c, 0, hipOffset, sw * 6, 0, 5, col, 1);
+        c.restore();
+        
+        // Right leg - scrunched, feet stay at actualFeetY (ground level)
+        c.save();
+        c.translate(rx, actualFeetY - footOffset); // Anchor so foot bottom aligns with ground
+        c.scale(1, legCompression); // Compress vertically upward from feet
+        drawLimb(c, 0, hipOffset, -sw * 6, 0, 5, col, 1);
+        c.restore();
+    } else {
+        // Normal legs - fy already represents ground level (bottom of feet)
+        drawLimb(c, lx, hy, lx + sw * 6, fy, 5, col, 1);
+        drawLimb(c, rx, hy, rx - sw * 6, fy, 5, col, 1);
+    }
+    // Arms - move down with body when crouching
+    drawLimb(c, f ? sr : sl, sy + crouchBodyOffset, (f ? sr : sl) + asw, sy + 15 + crouchBodyOffset, 4, col, 0);
+    
+    // Body - move down slightly when crouching (NO compression, just position shift)
+    c.translate(x, y + crouchBodyOffset);
     if (f) c.scale(-1, 1);
     const C = ['', '#000', col, '#FFF', '#4B0082', '#FFDAB9', '#B0B0B0', '#FFD700', '', '#FFD700'];
     WIZARD_BODY.forEach((row, r) => row.forEach((p, i) => {
@@ -43,7 +86,8 @@ export function drawPixelWizard(c, x, y, s, f, col, vx, vy, wx, wy) {
         }
     }));
     c.restore();
-    drawLimb(c, f ? sl : sr, sy, wx, wy, 4, col, 0);
+    // Wand arm - move down with body when crouching
+    drawLimb(c, f ? sl : sr, sy + crouchBodyOffset, wx, wy, 4, col, 0);
 }
 
 export function drawPixelWand(ctx, x, y, rotation, color) {
@@ -85,68 +129,223 @@ export function incrementAnimationFrame() {
 // Cache background pattern for performance
 let backgroundCache = null;
 
-function drawStaticBackground(ctx, canvas, V_W, V_H) {
-    // Check if we need to regenerate cache
-    if (!backgroundCache || backgroundCache.width !== canvas.width || backgroundCache.height !== canvas.height) {
+function drawStaticBackground(ctx, canvas, V_W, V_H, theme = 'default') {
+    // Check if we need to regenerate cache (including theme change)
+    const cacheKey = `${canvas.width}x${canvas.height}_${theme}`;
+    if (!backgroundCache || backgroundCache.cacheKey !== cacheKey) {
         backgroundCache = document.createElement('canvas');
         backgroundCache.width = canvas.width;
         backgroundCache.height = canvas.height;
+        backgroundCache.cacheKey = cacheKey;
         const bgCtx = backgroundCache.getContext('2d');
         
-        // Create dark cave-like gradient background
-        const gradient = bgCtx.createLinearGradient(0, 0, 0, canvas.height);
-        gradient.addColorStop(0, '#0a0a1a');  // Very dark blue-black at top
-        gradient.addColorStop(0.3, '#1a1a2e');  // Dark blue-gray
-        gradient.addColorStop(0.6, '#16213e');  // Slightly lighter
-        gradient.addColorStop(1, '#0f1419');    // Dark at bottom
-        
-        bgCtx.fillStyle = gradient;
-        bgCtx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // Add subtle cave wall textures/stalactites in background (very faint)
-        bgCtx.globalAlpha = 0.15;
-        bgCtx.fillStyle = '#2a2a3a';
-        
-        // Draw some subtle vertical "cave wall" patterns
-        const wallCount = Math.floor(canvas.width / 200);
-        for (let i = 0; i < wallCount; i++) {
-            const x = (canvas.width / (wallCount + 1)) * (i + 1);
-            bgCtx.beginPath();
-            bgCtx.moveTo(x, 0);
+        if (theme === 'clouds') {
+            // Sky blue gradient background for clouds theme
+            const gradient = bgCtx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#87CEEB');  // Sky blue at top
+            gradient.addColorStop(0.5, '#B0E0E6');  // Powder blue in middle
+            gradient.addColorStop(1, '#87CEEB');    // Sky blue at bottom
             
-            // Create wavy cave wall pattern
-            for (let y = 0; y < canvas.height; y += 10) {
-                const offset = Math.sin((y / 50) + (i * 2)) * 15;
-                bgCtx.lineTo(x + offset, y);
+            bgCtx.fillStyle = gradient;
+            bgCtx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Add subtle cloud-like shapes in background for clouds theme
+            bgCtx.globalAlpha = 0.3;
+            bgCtx.fillStyle = '#FFFFFF';
+            
+            // Draw some fluffy cloud shapes
+            for (let i = 0; i < 15; i++) {
+                const x = (canvas.width / 16) * (i + 1);
+                const y = canvas.height * (0.2 + Math.sin(i) * 0.3);
+                const size = 60 + Math.sin(i * 2) * 30;
+                
+                bgCtx.beginPath();
+                bgCtx.arc(x, y, size, 0, Math.PI * 2);
+                bgCtx.arc(x + size * 0.6, y, size * 0.8, 0, Math.PI * 2);
+                bgCtx.arc(x - size * 0.6, y, size * 0.8, 0, Math.PI * 2);
+                bgCtx.arc(x, y - size * 0.5, size * 0.7, 0, Math.PI * 2);
+                bgCtx.fill();
             }
-            bgCtx.lineTo(x, canvas.height);
-            bgCtx.lineTo(x - 30, canvas.height);
             
-            for (let y = canvas.height; y > 0; y -= 10) {
-                const offset = Math.sin((y / 50) + (i * 2)) * 15;
-                bgCtx.lineTo(x - 30 + offset, y);
+            bgCtx.globalAlpha = 1.0;
+        } else if (theme === 'space') {
+            // Deep space gradient background - dark purple/black with stars
+            const gradient = bgCtx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#0a0520');  // Very dark purple at top
+            gradient.addColorStop(0.3, '#1a0d33');  // Dark purple
+            gradient.addColorStop(0.6, '#2d1a4d');  // Medium purple
+            gradient.addColorStop(1, '#1a0d33');    // Dark purple at bottom
+            
+            bgCtx.fillStyle = gradient;
+            bgCtx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Add stars (various sizes and brightness)
+            bgCtx.fillStyle = '#FFFFFF';
+            for (let i = 0; i < 200; i++) {
+                const x = (i * 137.5) % canvas.width; // Use prime number for distribution
+                const y = (i * 203.7) % canvas.height;
+                const brightness = Math.random();
+                const size = brightness > 0.9 ? 2 : (brightness > 0.7 ? 1.5 : 1);
+                
+                bgCtx.globalAlpha = brightness * 0.8 + 0.2; // 0.2-1.0 opacity
+                bgCtx.beginPath();
+                bgCtx.arc(x, y, size, 0, Math.PI * 2);
+                bgCtx.fill();
             }
-            bgCtx.closePath();
-            bgCtx.fill();
-        }
-        
-        // Add some very subtle distant stalactites/stalagmites
-        bgCtx.globalAlpha = 0.08;
-        bgCtx.fillStyle = '#1a1a2a';
-        for (let i = 0; i < 20; i++) {
-            const x = (canvas.width / 21) * (i + 1);
-            const height = 40 + Math.sin(i) * 20;
-            const y = Math.random() > 0.5 ? 0 : canvas.height - height;
             
-            bgCtx.beginPath();
-            bgCtx.moveTo(x, y);
-            bgCtx.lineTo(x - 10, y + (y === 0 ? height : -height));
-            bgCtx.lineTo(x + 10, y + (y === 0 ? height : -height));
-            bgCtx.closePath();
-            bgCtx.fill();
+            // Add some brighter stars
+            bgCtx.globalAlpha = 0.9;
+            bgCtx.fillStyle = '#B0E0E6'; // Light blue-white
+            for (let i = 0; i < 30; i++) {
+                const x = (i * 421.3) % canvas.width;
+                const y = (i * 613.7) % canvas.height;
+                const size = 1.5 + Math.random() * 1;
+                
+                bgCtx.beginPath();
+                bgCtx.arc(x, y, size, 0, Math.PI * 2);
+                bgCtx.fill();
+            }
+            
+            // Add nebula-like clouds
+            bgCtx.globalAlpha = 0.15;
+            bgCtx.fillStyle = '#6B46C1'; // Purple nebula
+            for (let i = 0; i < 8; i++) {
+                const x = (canvas.width / 9) * (i + 1);
+                const y = canvas.height * (0.3 + Math.sin(i) * 0.4);
+                const size = 150 + Math.sin(i * 2) * 80;
+                
+                bgCtx.beginPath();
+                bgCtx.arc(x, y, size, 0, Math.PI * 2);
+                bgCtx.fill();
+            }
+            
+            // Add blue nebula clouds
+            bgCtx.globalAlpha = 0.12;
+            bgCtx.fillStyle = '#3B82F6'; // Blue nebula
+            for (let i = 0; i < 6; i++) {
+                const x = (canvas.width / 7) * (i + 1);
+                const y = canvas.height * (0.5 + Math.cos(i * 1.5) * 0.3);
+                const size = 120 + Math.cos(i * 1.8) * 60;
+                
+                bgCtx.beginPath();
+                bgCtx.arc(x, y, size, 0, Math.PI * 2);
+                bgCtx.fill();
+            }
+            
+            bgCtx.globalAlpha = 1.0;
+        } else if (theme === 'volcano') {
+            // Lava/volcano gradient background - deep red/orange from bottom to top
+            const gradient = bgCtx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#1a0a0a');  // Very dark red at top (ceiling)
+            gradient.addColorStop(0.3, '#2d0f0f');  // Dark red
+            gradient.addColorStop(0.6, '#4a1a1a');  // Medium dark red
+            gradient.addColorStop(0.8, '#8b3a1a');  // Orange-red (lava glow)
+            gradient.addColorStop(1, '#cc5500');    // Bright orange-red at bottom (lava pool)
+            
+            bgCtx.fillStyle = gradient;
+            bgCtx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Add glowing lava effects at the bottom
+            bgCtx.globalAlpha = 0.4;
+            bgCtx.fillStyle = '#ff6600';
+            
+            // Draw flowing lava pools at bottom
+            for (let i = 0; i < 8; i++) {
+                const x = (canvas.width / 9) * (i + 1);
+                const y = canvas.height - 50 - Math.sin(i * 0.8) * 30;
+                const width = 100 + Math.sin(i) * 40;
+                const height = 40 + Math.cos(i * 1.2) * 20;
+                
+                bgCtx.beginPath();
+                bgCtx.ellipse(x, y, width / 2, height / 2, 0, 0, Math.PI * 2);
+                bgCtx.fill();
+            }
+            
+            // Add glowing embers floating upward
+            bgCtx.globalAlpha = 0.3;
+            bgCtx.fillStyle = '#ffaa00';
+            for (let i = 0; i < 20; i++) {
+                const x = (canvas.width / 21) * (i + 1);
+                const y = canvas.height * (0.7 + Math.sin(i * 0.5) * 0.2);
+                const size = 3 + Math.sin(i) * 2;
+                
+                bgCtx.beginPath();
+                bgCtx.arc(x, y, size, 0, Math.PI * 2);
+                bgCtx.fill();
+            }
+            
+            // Add heat distortion/wavy lines near lava
+            bgCtx.globalAlpha = 0.2;
+            bgCtx.strokeStyle = '#ff8800';
+            bgCtx.lineWidth = 2;
+            for (let i = 0; i < 5; i++) {
+                const y = canvas.height - 100 - i * 30;
+                bgCtx.beginPath();
+                bgCtx.moveTo(0, y);
+                for (let x = 0; x < canvas.width; x += 10) {
+                    const offset = Math.sin((x / 50) + (i * 0.5)) * 5;
+                    bgCtx.lineTo(x, y + offset);
+                }
+                bgCtx.stroke();
+            }
+            
+            bgCtx.globalAlpha = 1.0;
+        } else {
+            // Create dark cave-like gradient background (default)
+            const gradient = bgCtx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#0a0a1a');  // Very dark blue-black at top
+            gradient.addColorStop(0.3, '#1a1a2e');  // Dark blue-gray
+            gradient.addColorStop(0.6, '#16213e');  // Slightly lighter
+            gradient.addColorStop(1, '#0f1419');    // Dark at bottom
+            
+            bgCtx.fillStyle = gradient;
+            bgCtx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Add subtle cave wall textures/stalactites in background (very faint)
+            bgCtx.globalAlpha = 0.15;
+            bgCtx.fillStyle = '#2a2a3a';
+            
+            // Draw some subtle vertical "cave wall" patterns
+            const wallCount = Math.floor(canvas.width / 200);
+            for (let i = 0; i < wallCount; i++) {
+                const x = (canvas.width / (wallCount + 1)) * (i + 1);
+                bgCtx.beginPath();
+                bgCtx.moveTo(x, 0);
+                
+                // Create wavy cave wall pattern
+                for (let y = 0; y < canvas.height; y += 10) {
+                    const offset = Math.sin((y / 50) + (i * 2)) * 15;
+                    bgCtx.lineTo(x + offset, y);
+                }
+                bgCtx.lineTo(x, canvas.height);
+                bgCtx.lineTo(x - 30, canvas.height);
+                
+                for (let y = canvas.height; y > 0; y -= 10) {
+                    const offset = Math.sin((y / 50) + (i * 2)) * 15;
+                    bgCtx.lineTo(x - 30 + offset, y);
+                }
+                bgCtx.closePath();
+                bgCtx.fill();
+            }
+            
+            // Add some very subtle distant stalactites/stalagmites
+            bgCtx.globalAlpha = 0.08;
+            bgCtx.fillStyle = '#1a1a2a';
+            for (let i = 0; i < 20; i++) {
+                const x = (canvas.width / 21) * (i + 1);
+                const height = 40 + Math.sin(i) * 20;
+                const y = Math.random() > 0.5 ? 0 : canvas.height - height;
+                
+                bgCtx.beginPath();
+                bgCtx.moveTo(x, y);
+                bgCtx.lineTo(x - 10, y + (y === 0 ? height : -height));
+                bgCtx.lineTo(x + 10, y + (y === 0 ? height : -height));
+                bgCtx.closePath();
+                bgCtx.fill();
+            }
+            
+            bgCtx.globalAlpha = 1.0;
         }
-        
-        bgCtx.globalAlpha = 1.0;
     }
     
     // Draw cached background (no transform, so it stays static)
@@ -157,7 +356,8 @@ export function render(ctx, canvas, cam, viewScale, world, players, myId, orbs, 
     if (!ctx || !canvas || canvas.width === 0 || canvas.height === 0) return viewScale;
     
     // Draw static background first (no camera transform)
-    drawStaticBackground(ctx, canvas, V_W, V_H);
+    const theme = (window.gameState && window.gameState.theme) || 'default';
+    drawStaticBackground(ctx, canvas, V_W, V_H, theme);
     
     // Use fixed reference size (original 1920x1080) for consistent zoom level
     // This ensures the player sees the same relative area regardless of world size
@@ -283,6 +483,7 @@ export function render(ctx, canvas, cam, viewScale, world, players, myId, orbs, 
     const normalParticles = [];
     
     particles.forEach(p => {
+        // Physics particles use Matter.js body position
         const px = p.position.x;
         const py = p.position.y;
         
@@ -350,10 +551,12 @@ export function render(ctx, canvas, cam, viewScale, world, players, myId, orbs, 
         const wizW = PR * 2.8 * sizeMul, wizH = PR * 4.2 * sizeMul;
 
         // Calculate wand position (same point we fire from) - scale with size
+        // Body position already shifts down when crouching, so wand follows automatically
         const handX = x + Math.cos(p.ang) * effectiveRadius * 1.2 + (p.dir === 1 ? effectiveRadius * 1.2 : -effectiveRadius * 1.2);
         const handY = y + Math.sin(p.ang) * effectiveRadius * 1.2 + (effectiveRadius * 0.5 - (effectiveRadius * 4.2 - effectiveRadius) / 2 + PLAYER_CFG.wandDownShift);
 
-        drawPixelWizard(ctx, x, y, sizeMul, p.dir === -1, p.color, p.body.velocity.x, p.body.velocity.y, handX, handY);
+        // Visual crouch - pass crouch state to rendering function
+        drawPixelWizard(ctx, x, y, sizeMul, p.dir === -1, p.color, p.body.velocity.x, p.body.velocity.y, handX, handY, p.isCrouching);
         
         drawPixelWand(ctx, handX, handY, p.ang + Math.PI / 4, p.color);
 

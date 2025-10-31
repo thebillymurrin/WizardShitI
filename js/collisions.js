@@ -48,7 +48,7 @@ function handleOrbPlayerCollision(orb, playerBody, players, orbs, world, particl
         if (orb.isRPG) {
             explodeRPG(orb, players, orbs, world, particles, gameState, damagePlayerFn);
         } else {
-            damagePlayerFn(players, hitPlayerId, orb.damage || 10, world, gameState.myId, updateActiveUI);
+            damagePlayerFn(players, hitPlayerId, orb.damage || 10, world, orb.ownerId, gameState.myId, updateActiveUI);
             breakOrb(orb, orbs, world, particles);
         }
     }
@@ -62,7 +62,7 @@ function handleOrbWallCollision(orb, wallBody, orbs, world, players, particles, 
         if (wallBody.isVoxel) {
             // Damage the voxel based on bullet damage
             const damage = orb.damage || 10;
-            damageVoxel(world, wallBody, damage, particles);
+            damageVoxel(world, wallBody, damage, particles, window.broadcastVoxelDamage);
             breakOrb(orb, orbs, world, particles);
         } else if (orb.isBouncy) {
             // Bouncy bullets don't break on wall hit, they bounce (handled by Matter.js restitution)
@@ -93,7 +93,7 @@ function explodeRPG(orb, players, orbs, world, particles, gameState, damagePlaye
         
         if (dist < EXPLOSION.RPG_RADIUS) {
             const damageFalloff = 1 - (dist / EXPLOSION.RPG_RADIUS);
-            damagePlayerFn(players, pid, EXPLOSION.RPG_DAMAGE * damageFalloff, world, gameState.myId);
+            damagePlayerFn(players, pid, EXPLOSION.RPG_DAMAGE * damageFalloff, world, orb.ownerId, gameState.myId);
         }
     }
     
@@ -106,7 +106,7 @@ function explodeRPG(orb, players, orbs, world, particles, gameState, damagePlaye
         
         if (dist < EXPLOSION.RPG_RADIUS) {
             const damageFalloff = 1 - (dist / EXPLOSION.RPG_RADIUS);
-            damageVoxel(world, voxel, voxelDamage * damageFalloff, particles);
+            damageVoxel(world, voxel, voxelDamage * damageFalloff, particles, window.broadcastVoxelDamage);
         }
     });
     

@@ -1,9 +1,9 @@
 /* Physics and Level Generation */
 
-import { V_W, V_H, PLAYER_CFG, COLLISION_FILTERS, VOXEL_CFG } from './config.js';
+import { V_W, V_H, PLAYER_CFG, COLLISION_FILTERS, VOXEL_CFG, PARTICLE_SETTINGS } from './config.js';
 
 // Helper to create static wall bodies with voxel texture
-export function createStaticWall(x, y, width, height, options = {}) {
+export function createStaticWall(x, y, width, height, options = {}, theme = 'default') {
     const body = Matter.Bodies.rectangle(x, y, width, height, {
         isStatic: true,
         collisionFilter: COLLISION_FILTERS.wall,
@@ -22,8 +22,36 @@ export function createStaticWall(x, y, width, height, options = {}) {
             const vx = i * vs, vy = r * vs;
             const seed = ((x + vx) * 73856093) ^ ((y + vy) * 19349663);
             const rand = ((seed * 2654435761) % 1000) / 1000;
-            const grey = 60 + Math.floor(rand * 60);
-            c.fillStyle = `rgb(${grey},${grey},${grey})`;
+            
+            if (theme === 'clouds') {
+                // White cloud-like bricks with slight variation
+                const white = 240 + Math.floor(rand * 15); // 240-255 for white with slight variation
+                c.fillStyle = `rgb(${white},${white},${white})`;
+            } else if (theme === 'volcano') {
+                // Volcanic stone bricks - dark red/orange/brown tones
+                const hue = Math.floor(rand * 30); // 0-30 for red-orange range
+                const red = 80 + Math.floor(rand * 40); // 80-120 dark red
+                const green = 30 + Math.floor(rand * 30); // 30-60 dark orange/brown
+                const blue = 20 + Math.floor(rand * 20); // 20-40 very dark
+                c.fillStyle = `rgb(${red},${green},${blue})`;
+            } else if (theme === 'space') {
+                // Space/cosmic bricks - dark purple/blue with occasional sparkles
+                if (rand > 0.85) {
+                    // Occasional bright sparkle (15% chance)
+                    const sparkle = 200 + Math.floor(rand * 55); // 200-255 bright
+                    c.fillStyle = `rgb(${sparkle},${sparkle},${sparkle})`;
+                } else {
+                    // Dark cosmic purple/blue
+                    const red = 40 + Math.floor(rand * 30); // 40-70 dark purple
+                    const green = 30 + Math.floor(rand * 25); // 30-55 dark blue-purple
+                    const blue = 60 + Math.floor(rand * 40); // 60-100 dark blue
+                    c.fillStyle = `rgb(${red},${green},${blue})`;
+                }
+            } else {
+                // Default grey bricks
+                const grey = 60 + Math.floor(rand * 60);
+                c.fillStyle = `rgb(${grey},${grey},${grey})`;
+            }
             c.fillRect(vx, vy, vs - 1, vs - 1);
         }
     }
@@ -37,40 +65,68 @@ const MAX_POOL_SIZE = 200;
 
 // Helper to create and add a particle (with object pooling)
 export function createParticle(x, y, size, angle, speed, life, fillStyle, type = null, world, particles) {
+    // Don't create particles if simulation is disabled
+    if (!PARTICLE_SETTINGS.simulateParticles) {
+        return null;
+    }
+    
+    const adjustedLife = Math.floor(life * PARTICLE_SETTINGS.particleDuration);
+    
+    // Remove oldest particles if we're at the cap (for performance)
+    while (particles.length >= PARTICLE_SETTINGS.maxParticles) {
+        const oldestParticle = particles[0]; // Oldest is first in array
+        recycleParticle(oldestParticle, world, particles);
+    }
+    
+    // Create physics-based particle
     let particle;
     
     // Try to reuse from pool
     if (particlePool.length > 0) {
         particle = particlePool.pop();
-        // Reset particle properties
+        // Reset particle properties and physics state
         Matter.Body.setPosition(particle, { x, y });
         Matter.Body.setVelocity(particle, { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed });
+        Matter.Body.setAngularVelocity(particle, 0);
         // Update circle radius if changed
         if (particle.circleRadius !== size) {
             Matter.Body.scale(particle, size / particle.circleRadius, size / particle.circleRadius);
         }
         particle.circleRadius = size;
         particle.render.fillStyle = fillStyle;
-        particle.life = life;
+        particle.life = adjustedLife;
         particle.isGlowing = type === 'fire';
         particle.isSmoke = type === 'smoke';
-        particle.maxLife = life; // Store max life for alpha calculation
+        particle.maxLife = adjustedLife;
     } else {
-        // Create new particle
+        // Create new particle as full physics body
         particle = Matter.Bodies.circle(x, y, size, {
             restitution: type === 'smoke' ? 0.1 : type === 'fire' ? 0.2 : 0.3,
             frictionAir: type === 'smoke' ? 0.02 : type === 'fire' ? 0.08 : 0.06,
+            friction: 0.1,
+            density: 0.001, // Light particles
             render: { fillStyle },
-            collisionFilter: { category: 0x0004, mask: 0x0000 } // Don't collide with anything
+            // Particles can collide with walls but not with each other or players
+            collisionFilter: { 
+                category: 0x0010, // Particle category
+                mask: COLLISION_FILTERS.wall.category // Can collide with walls
+            }
         });
         particle.isParticle = true;
         particle.circleRadius = size;
-        particle.life = life;
-        particle.maxLife = life;
+        particle.life = adjustedLife;
+        particle.maxLife = adjustedLife;
         if (type === 'fire') particle.isGlowing = true;
         if (type === 'smoke') particle.isSmoke = true;
     }
     
+    // Set initial velocity for physics simulation
+    Matter.Body.setVelocity(particle, {
+        x: Math.cos(angle) * speed,
+        y: Math.sin(angle) * speed
+    });
+    
+    // Add to world for physics simulation
     Matter.World.add(world, particle);
     particles.push(particle);
     return particle;
@@ -82,15 +138,17 @@ export function recycleParticle(particle, world, particles) {
     if (index > -1) {
         particles.splice(index, 1);
     }
-    Matter.World.remove(world, particle);
     
-    // Add back to pool if not full
-    if (particlePool.length < MAX_POOL_SIZE) {
-        particlePool.push(particle);
+    // Remove from world and return to physics pool
+    if (particle && !particle.isVisual) {
+        Matter.World.remove(world, particle);
+        if (particlePool.length < MAX_POOL_SIZE) {
+            particlePool.push(particle);
+        }
     }
 }
 
-export function buildLevel(world, seededRandom) {
+export function buildLevel(world, seededRandom, theme = 'default') {
     const TS = PLAYER_CFG.tileSize;
     const floorY = V_H - PLAYER_CFG.floorThickness * TS;
     const playableWidth = V_W - 2 * TS;
@@ -423,14 +481,14 @@ export function buildLevel(world, seededRandom) {
                                       y === 0 || y === gridHeight - 1;
                     
                     if (blockY > TS && blockY < floorY) {
-                        const wall = createStaticWall(blockX, blockY, blockW, TS);
+                        const wall = createStaticWall(blockX, blockY, blockW, TS, {}, theme);
                         if (isEdgeWall) {
                             wall.isVoxel = false; // Edge walls are indestructible
                         } else {
                             wall.isVoxel = true; // Mark as destructible voxel
                             wall.health = VOXEL_CFG.maxHealth; // Initialize health
                             wall.maxHealth = VOXEL_CFG.maxHealth;
-                            wall.voxelData = { x: blockX, y: blockY, width: blockW, height: TS }; // Store for regeneration
+                            wall.voxelData = { x: blockX, y: blockY, width: blockW, height: TS, theme }; // Store for regeneration
                         }
                         Matter.World.add(world, wall);
                     }
@@ -452,7 +510,7 @@ export function buildLevel(world, seededRandom) {
                               y === 0 || y === gridHeight - 1;
             
             if (blockY > TS && blockY < floorY) {
-                const wall = createStaticWall(blockX, blockY, blockW, TS);
+                const wall = createStaticWall(blockX, blockY, blockW, TS, {}, theme);
                 if (isEdgeWall) {
                     wall.isVoxel = false; // Edge walls are indestructible
                 } else {
@@ -467,24 +525,24 @@ export function buildLevel(world, seededRandom) {
     }
     
     // Step 8: Add boundary walls (visual boundaries) - these are NOT destructible
-    const leftBoundary = createStaticWall(TS / 2, playableHeight / 2 + TS, TS, playableHeight);
+    const leftBoundary = createStaticWall(TS / 2, playableHeight / 2 + TS, TS, playableHeight, {}, theme);
     leftBoundary.isVoxel = false; // Not destructible
     Matter.World.add(world, leftBoundary);
     
-    const rightBoundary = createStaticWall(V_W - TS / 2, playableHeight / 2 + TS, TS, playableHeight);
+    const rightBoundary = createStaticWall(V_W - TS / 2, playableHeight / 2 + TS, TS, playableHeight, {}, theme);
     rightBoundary.isVoxel = false; // Not destructible
     Matter.World.add(world, rightBoundary);
     
-    const ceilingBoundary = createStaticWall(V_W / 2, TS / 2, V_W, TS);
+    const ceilingBoundary = createStaticWall(V_W / 2, TS / 2, V_W, TS, {}, theme);
     ceilingBoundary.isVoxel = false; // Not destructible
     Matter.World.add(world, ceilingBoundary);
 }
 
 // Store destroyed voxels for regeneration
-const destroyedVoxels = [];
-const VOXEL_REGENERATION_TIME = 10000; // 10 seconds
+export const destroyedVoxels = [];
+export const VOXEL_REGENERATION_TIME = 10000; // 10 seconds
 
-export function damageVoxel(world, voxelBody, damage, particles) {
+export function damageVoxel(world, voxelBody, damage, particles, broadcastDamage = null) {
     // Don't damage boundary walls - only destructible voxels
     if (!voxelBody.isVoxel || voxelBody.isVoxel === false) return;
     
@@ -492,6 +550,17 @@ export function damageVoxel(world, voxelBody, damage, particles) {
     if (voxelBody.health === undefined) {
         voxelBody.health = VOXEL_CFG.maxHealth;
         voxelBody.maxHealth = VOXEL_CFG.maxHealth;
+    }
+    
+    // Broadcast damage to other players if this is local damage
+    if (broadcastDamage && voxelBody.voxelData) {
+        broadcastDamage({
+            x: voxelBody.voxelData.x,
+            y: voxelBody.voxelData.y,
+            width: voxelBody.voxelData.width,
+            height: voxelBody.voxelData.height,
+            damage: damage
+        });
     }
     
     // Apply damage
@@ -512,15 +581,26 @@ export function damageVoxel(world, voxelBody, damage, particles) {
     
     // Check if destroyed
     if (voxelBody.health <= 0) {
-        destroyVoxel(world, voxelBody, particles);
+        destroyVoxel(world, voxelBody, particles, broadcastDamage);
     }
 }
 
-function destroyVoxel(world, voxelBody, particles) {
+function destroyVoxel(world, voxelBody, particles, broadcastDamage = null) {
     if (!voxelBody.isVoxel) return; // Don't destroy boundary walls
     
     const pos = voxelBody.position;
     const color = '#888'; // Gray debris color
+    
+    // Broadcast destruction if this is local
+    if (broadcastDamage && voxelBody.voxelData) {
+        broadcastDamage({
+            x: voxelBody.voxelData.x,
+            y: voxelBody.voxelData.y,
+            width: voxelBody.voxelData.width,
+            height: voxelBody.voxelData.height,
+            damage: 9999 // Signal complete destruction
+        });
+    }
     
     // Create destruction particles
     for (let i = 0; i < 15; i++) {
@@ -581,8 +661,9 @@ export function regenerateVoxels(world, players = {}) {
             
             // Only regenerate if no player is in the way
             if (!playerInWay) {
-                // Regenerate the voxel with full health
-                const wall = createStaticWall(voxel.data.x, voxel.data.y, voxel.data.width, voxel.data.height);
+                // Regenerate the voxel with full health (use theme from voxel data if available)
+                const theme = voxel.data.theme || 'default';
+                const wall = createStaticWall(voxel.data.x, voxel.data.y, voxel.data.width, voxel.data.height, {}, theme);
                 wall.isVoxel = true;
                 wall.health = VOXEL_CFG.maxHealth;
                 wall.maxHealth = VOXEL_CFG.maxHealth;
