@@ -13,6 +13,7 @@ export function startNetworking(roomName, world, players, ui, info, pc, gameStat
     }
     
     const safe = sanitize(roomName);
+    console.log(`Room name: "${roomName}" → sanitized: "${safe}"`);
     
     // Use room name as seed for deterministic level generation
     // Improved hash function for better seed distribution
@@ -99,6 +100,25 @@ export function startNetworking(roomName, world, players, ui, info, pc, gameStat
     // Add local player
     const spawn = findSafeSpawnLocation(world, players);
     addPlayer(world, players, pc, gameState.myId, spawn.x, spawn.y, null, playerName);
+    
+    // Update player count display
+    const updatePlayerCount = () => {
+        try {
+            if (gameState.room && pc) {
+                const peers = gameState.room.getPeers();
+                const peerCount = (peers && Array.isArray(peers)) ? peers.length : 0;
+                const totalPlayers = Object.keys(players).length;
+                pc.textContent = Math.max(totalPlayers, peerCount + 1);
+                console.log(`Player count updated: ${pc.textContent} (peers: ${peerCount}, local players: ${totalPlayers})`);
+            }
+        } catch (e) {
+            console.warn('Failed to update player count:', e);
+        }
+    };
+    
+    // Initial player count update
+    updatePlayerCount();
+    
     // Show UI elements (leaderboard replaces info)
     if (ui) ui.style.display = 'block';
     const leaderboard = document.getElementById('leaderboard');
@@ -106,12 +126,13 @@ export function startNetworking(roomName, world, players, ui, info, pc, gameStat
     
     // Handle peer joining
     gameState.room.onPeerJoin(peerId => {
-        console.log(`Peer joined: ${peerId}`);
-        pc.textContent = gameState.room.getPeers().length + 1;
+        console.log(`✓ Peer joined: ${peerId}`);
+        updatePlayerCount();
         
         // Send our player info to new peer
         const p = players[gameState.myId];
         if (p) {
+            console.log(`Sending join message to new peer ${peerId}`);
             sendJoin({
                 id: gameState.myId,
                 x: p.body.position.x,
@@ -125,12 +146,12 @@ export function startNetworking(roomName, world, players, ui, info, pc, gameStat
     
     // Handle peer leaving
     gameState.room.onPeerLeave(peerId => {
-        console.log(`Peer left: ${peerId}`);
+        console.log(`✗ Peer left: ${peerId}`);
         if (players[peerId]) {
             Matter.World.remove(world, players[peerId].body);
             delete players[peerId];
         }
-        pc.textContent = gameState.room.getPeers().length + 1;
+        updatePlayerCount();
         
         // Handle host migration if host leaves
         const remainingPeers = gameState.room.getPeers();
@@ -142,12 +163,53 @@ export function startNetworking(roomName, world, players, ui, info, pc, gameStat
         }
     });
     
+    // Check for existing peers periodically and send join message if needed
+    // This ensures we connect to peers who joined before us
+    const checkExistingPeers = () => {
+        try {
+            if (!gameState.room) {
+                setTimeout(checkExistingPeers, 500);
+                return;
+            }
+            
+            const existingPeers = gameState.room.getPeers();
+            const p = players[gameState.myId];
+            
+            if (p && existingPeers && existingPeers.length > 0) {
+                console.log(`Found ${existingPeers.length} existing peer(s), sending join messages...`);
+                existingPeers.forEach(peerId => {
+                    // Send join message to existing peers
+                    sendJoin({
+                        id: gameState.myId,
+                        x: p.body.position.x,
+                        y: p.body.position.y,
+                        color: p.color,
+                        name: p.name,
+                        seed: levelSeedRef.current
+                    }, peerId);
+                });
+            }
+            
+            updatePlayerCount();
+        } catch (e) {
+            console.warn('Error checking existing peers:', e);
+        }
+    };
+    
+    // Check for existing peers after a short delay (allow room to initialize)
+    setTimeout(checkExistingPeers, 1000);
+    setTimeout(checkExistingPeers, 3000);
+    setTimeout(checkExistingPeers, 5000);
+    
     // Receive join messages
     receiveJoin((data, peerId) => {
-        console.log(`Received join from peer ${peerId}:`, data);
+        console.log(`✓ Received join from peer ${peerId}:`, data);
         if (data.id !== gameState.myId && !players[data.id]) {
             addPlayer(world, players, pc, data.id, data.x, data.y, data.color, data.name);
             console.log(`✓ Added remote player: ${data.name || data.id}`);
+            updatePlayerCount();
+        } else if (players[data.id]) {
+            console.log(`Player ${data.id} already exists, skipping`);
         }
     });
     
@@ -157,8 +219,13 @@ export function startNetworking(roomName, world, players, ui, info, pc, gameStat
             if (!players[data.id]) {
                 console.log(`Received state from new player: ${data.id} (peer: ${peerId})`);
                 addPlayer(world, players, pc, data.id, data.x, data.y, data.color, data.name);
+                updatePlayerCount();
             }
             const p = players[data.id];
+            if (!p) {
+                console.warn(`Received state for unknown player: ${data.id}`);
+                return;
+            }
             Matter.Body.setPosition(p.body, { x: data.x, y: data.y });
             Matter.Body.setVelocity(p.body, { x: data.vx, y: data.vy });
             p.dir = data.dir;
@@ -278,13 +345,19 @@ export function startNetworking(roomName, world, players, ui, info, pc, gameStat
     setTimeout(checkHostStatus, 1000);
     setTimeout(checkHostStatus, 2000);
     
-    // Log peer count periodically for debugging
+    // Log peer count periodically for debugging (less verbose)
+    let lastPeerCount = -1;
     setInterval(() => {
         try {
             if (gameState.room) {
                 const peers = gameState.room.getPeers();
                 const peerCount = (peers && Array.isArray(peers)) ? peers.length : 0;
-                console.log(`Current peers: ${peerCount}`);
+                // Only log if peer count changes
+                if (peerCount !== lastPeerCount) {
+                    lastPeerCount = peerCount;
+                    console.log(`Peer status: ${peerCount} peer(s) connected, ${Object.keys(players).length} total player(s)`);
+                    updatePlayerCount();
+                }
             }
         } catch (e) {
             // Ignore errors

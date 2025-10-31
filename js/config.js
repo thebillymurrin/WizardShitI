@@ -12,7 +12,7 @@ export const PLAYER_CFG = {
     /* Movement */
     force: 0.001,
     maxSpeed: 1.5,
-    jumpForce: 0.01,
+    jumpForce: 0.02,
     climbForce: 0.005,
 
     /* Weapon – base values (modified by power‑ups) */
