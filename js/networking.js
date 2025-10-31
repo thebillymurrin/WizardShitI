@@ -61,9 +61,28 @@ export function startNetworking(roomName, world, players, ui, info, pc, gameStat
         gameState.theme = theme;
     }
     
-    // Join room with Trystero (no keys needed!)
-    gameState.room = window.trystero.joinRoom({ appId: 'wizard-game' }, safe);
-    gameState.myId = Math.random().toString(36).substr(2, 9);
+    // Join room with Trystero
+    // Note: Trystero uses Firebase for signaling by default, which should work over the internet
+    // If multiplayer only works locally, check:
+    // 1. Firewall settings (allow WebRTC ports UDP 3478, 5349, 49152-65535)
+    // 2. NAT type (strict NAT may prevent connections)
+    // 3. Browser console for WebRTC connection errors
+    try {
+        gameState.room = window.trystero.joinRoom({ appId: 'wizard-game' }, safe);
+        gameState.myId = Math.random().toString(36).substr(2, 9);
+        
+        console.log(`✓ Joining room: ${safe}`);
+        console.log(`✓ My ID: ${gameState.myId}`);
+        
+        // Log room info for debugging
+        if (gameState.room) {
+            console.log('✓ Room created successfully');
+        }
+    } catch (error) {
+        console.error('✗ Failed to join room:', error);
+        alert('Failed to connect to multiplayer room. Check console for details.');
+        return;
+    }
     
     // Setup message channels (names must be ≤12 bytes)
     const [sendState, receiveState] = gameState.room.makeAction('state');
@@ -87,6 +106,7 @@ export function startNetworking(roomName, world, players, ui, info, pc, gameStat
     
     // Handle peer joining
     gameState.room.onPeerJoin(peerId => {
+        console.log(`Peer joined: ${peerId}`);
         pc.textContent = gameState.room.getPeers().length + 1;
         
         // Send our player info to new peer
@@ -105,6 +125,7 @@ export function startNetworking(roomName, world, players, ui, info, pc, gameStat
     
     // Handle peer leaving
     gameState.room.onPeerLeave(peerId => {
+        console.log(`Peer left: ${peerId}`);
         if (players[peerId]) {
             Matter.World.remove(world, players[peerId].body);
             delete players[peerId];
@@ -123,15 +144,20 @@ export function startNetworking(roomName, world, players, ui, info, pc, gameStat
     
     // Receive join messages
     receiveJoin((data, peerId) => {
+        console.log(`Received join from peer ${peerId}:`, data);
         if (data.id !== gameState.myId && !players[data.id]) {
             addPlayer(world, players, pc, data.id, data.x, data.y, data.color, data.name);
+            console.log(`✓ Added remote player: ${data.name || data.id}`);
         }
     });
     
     // Receive state updates
     receiveState((data, peerId) => {
         if (data.id !== gameState.myId) {
-            if (!players[data.id]) addPlayer(world, players, pc, data.id, data.x, data.y, data.color, data.name);
+            if (!players[data.id]) {
+                console.log(`Received state from new player: ${data.id} (peer: ${peerId})`);
+                addPlayer(world, players, pc, data.id, data.x, data.y, data.color, data.name);
+            }
             const p = players[data.id];
             Matter.Body.setPosition(p.body, { x: data.x, y: data.y });
             Matter.Body.setVelocity(p.body, { x: data.vx, y: data.vy });
@@ -251,5 +277,18 @@ export function startNetworking(roomName, world, players, ui, info, pc, gameStat
     setTimeout(checkHostStatus, 300);
     setTimeout(checkHostStatus, 1000);
     setTimeout(checkHostStatus, 2000);
+    
+    // Log peer count periodically for debugging
+    setInterval(() => {
+        try {
+            if (gameState.room) {
+                const peers = gameState.room.getPeers();
+                const peerCount = (peers && Array.isArray(peers)) ? peers.length : 0;
+                console.log(`Current peers: ${peerCount}`);
+            }
+        } catch (e) {
+            // Ignore errors
+        }
+    }, 5000);
 }
 
