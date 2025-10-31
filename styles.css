@@ -47,36 +47,41 @@ html, body {
     text-align: center;
     position: relative;
     z-index: 10;
-    padding: 20px 0;
+    padding: 20px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     width: 100%;
     box-sizing: border-box;
-    margin-top: -10vh;
+    margin: 0 auto;
 }
 
 .splash-logo {
     width: 70vw;
     max-width: 1200px;
     height: auto;
-    margin: 0 auto;
-    margin-bottom: 0px;
+    margin: 0 auto 30px;
     image-rendering: pixelated;
     image-rendering: crisp-edges;
     display: block;
+    align-self: center;
 }
 
+.join-room-section {
+    width: 100%;
+    max-width: 400px;
+    margin: 0 auto;
+}
 
 .menu-buttons {
     display: flex;
     flex-direction: column;
     gap: 15px;
-    margin-bottom: 35px;
-    margin-top: -100px;
+    margin: 20px 0 35px;
     align-items: center;
     width: 100%;
+    max-width: 400px;
     justify-content: center;
 }
 
@@ -214,6 +219,10 @@ html, body {
 
 .input-group {
     margin-bottom: 25px;
+    width: 100%;
+    max-width: 400px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .input-group label {
@@ -400,6 +409,54 @@ input[type="range"]::-moz-range-thumb {
     background: #f4e4bc;
 }
 
+/* Keybind Settings */
+.keybind-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.keybind-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.keybind-item label {
+    color: #c9a9dd;
+    font-size: 0.9rem;
+    min-width: 100px;
+    text-transform: none;
+    letter-spacing: 0.5px;
+}
+
+.keybind-input {
+    flex: 1;
+    padding: 8px 12px;
+    background: rgba(29, 19, 39, 0.8);
+    border: 2px solid #8b6fa8;
+    color: #f4e4bc;
+    font-family: 'MedievalSharp', cursive, fantasy;
+    font-size: 0.95rem;
+    outline: none;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.keybind-input:hover {
+    background: rgba(45, 27, 61, 0.9);
+    border-color: #d4af37;
+}
+
+.keybind-input:focus {
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3), 0 0 8px rgba(212, 175, 55, 0.4);
+    border-color: #d4af37;
+    background: rgba(45, 27, 61, 0.9);
+}
+
 /* Game Screen */
 .game-screen {
     width: 100%;
@@ -408,7 +465,7 @@ input[type="range"]::-moz-range-thumb {
     position: relative;
 }
 
-#ui, #info, #activeUps {
+#ui, #leaderboard, #activeUps {
     position: absolute;
     z-index: 5;
     padding: 10px;
@@ -423,8 +480,58 @@ input[type="range"]::-moz-range-thumb {
     left: 10px;
 }
 
-#info {
-    display: none;
+#leaderboard {
+    top: 50px;
+    left: 10px;
+    min-width: 200px;
+    max-width: 300px;
+}
+
+.leaderboard-title {
+    font-weight: bold;
+    font-size: 1rem;
+    margin-bottom: 8px;
+    text-align: center;
+    color: #d4af37;
+    border-bottom: 1px solid #8b6fa8;
+    padding-bottom: 5px;
+}
+
+.leaderboard-entry {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 0.85rem;
+    border-bottom: 1px solid rgba(139, 111, 168, 0.3);
+}
+
+.leaderboard-entry:last-child {
+    border-bottom: none;
+}
+
+.leaderboard-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.leaderboard-stats {
+    display: flex;
+    gap: 15px;
+    margin-left: 10px;
+}
+
+.leaderboard-kills {
+    color: #ff6b6b;
+    min-width: 40px;
+    text-align: right;
+}
+
+.leaderboard-deaths {
+    color: #8b6fa8;
+    min-width: 40px;
+    text-align: right;
 }
 
 #activeUps {
@@ -486,30 +593,6 @@ canvas {
 .leave-btn:hover {
     background: rgba(255, 0, 0, 0.9);
     box-shadow: 0 0 15px #ff0000;
-}
-
-.unstuck-btn {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: rgba(201, 169, 221, 0.8);
-    border: 2px solid #c9a9dd;
-    color: #fff;
-    padding: 12px 24px;
-    font-size: 14px;
-    font-family: 'MedievalSharp', cursive, fantasy;
-    cursor: pointer;
-    font-weight: bold;
-    transition: all 0.2s;
-    z-index: 1000;
-    border-radius: 4px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-}
-
-.unstuck-btn:hover {
-    background: rgba(201, 169, 221, 1);
-    box-shadow: 0 0 15px #c9a9dd;
-    transform: translateY(-2px);
 }
 
 /* Developer Console */

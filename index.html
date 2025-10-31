@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Wizard Battle</title>
     <link rel="stylesheet" href="styles.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js" 
+            onerror="console.error('Failed to load Matter.js from CDN. Please check your internet connection.');"></script>
     <script src="https://cdn.jsdelivr.net/npm/tone@14.8.39/build/Tone.min.js"></script>
 </head>
 <body>
@@ -15,68 +16,31 @@
         <div class="menu-container">
             <img src="assets/release.png" alt="Game Logo" class="splash-logo">
             
-            <div class="menu-buttons">
-                <button class="btn" id="playBtn">▶ FIND MATCH</button>
-                <button class="btn" id="createRoomBtn">➕ CREATE ROOM</button>
-                <button class="btn" id="joinRoomBtn">🔍 JOIN ROOM</button>
-                <button class="btn" id="settingsBtn">⚙ SETTINGS</button>
+            <div class="input-group">
+                <label style="text-align: center; display: block;">PLAYER NAME:</label>
+                <input type="text" id="playerNameInput" placeholder="Enter your name..." maxlength="20" autocomplete="off" style="text-transform: uppercase; text-align: center;">
             </div>
-
-            <div class="info-text">
-                > Use A/D or ←/→ to move, W or ↑ to jump<br>
-                > Hold W on walls to climb • Click to shoot
+            
+            <div class="join-room-section">
+                <div class="input-group" style="margin-bottom: 15px;">
+                    <label style="text-align: center; display: block;">ROOM NAME:</label>
+                    <input type="text" id="joinRoomName" placeholder="Enter room name..." maxlength="20" autocomplete="off" style="text-transform: uppercase; text-align: center;">
+                </div>
+                <button class="btn" id="joinRoomBtn" style="width: 100%;">JOIN</button>
+            </div>
+            
+            <div class="menu-buttons">
+                <button class="btn" id="playBtn">AUTO JOIN LOBBY</button>
+                <button class="btn" id="settingsBtn">⚙ SETTINGS</button>
             </div>
             
             <div class="credit-text">An indie game by Billy Murrin</div>
-        </div>
-
-        <!-- Create Room Panel -->
-        <div class="panel" id="createRoomPanel">
-            <div class="panel-content">
-                <div class="panel-title">➕ CREATE ROOM</div>
-                <div class="input-group">
-                    <label>Room Name:</label>
-                    <input type="text" id="createRoomName" placeholder="Enter room name..." maxlength="20" autocomplete="off">
-                </div>
-                <div class="panel-buttons">
-                    <button class="btn" id="confirmCreateBtn">✓ CREATE</button>
-                    <button class="btn" id="cancelCreateBtn">✕ CANCEL</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Join Room Panel -->
-        <div class="panel" id="joinRoomPanel">
-            <div class="panel-content">
-                <div class="panel-title">🔍 JOIN ROOM</div>
-                <div class="room-list-container">
-                    <div class="recent-rooms">
-                        <label>Recent Rooms:</label>
-                        <div id="recentRoomsList" class="room-list"></div>
-                    </div>
-                    <div class="input-group">
-                        <label>Or Enter Room Name:</label>
-                        <input type="text" id="joinRoomName" placeholder="Type room name..." maxlength="20" autocomplete="off">
-                    </div>
-                </div>
-                <div class="panel-buttons">
-                    <button class="btn" id="confirmJoinBtn">✓ JOIN</button>
-                    <button class="btn" id="cancelJoinBtn">✕ CANCEL</button>
-                </div>
-            </div>
         </div>
 
         <!-- Settings Panel -->
         <div class="panel" id="settingsPanel">
             <div class="panel-content">
                 <div class="panel-title">⚙ SETTINGS</div>
-                <div class="setting-item">
-                    <label>🔊 Master Volume</label>
-                    <div class="setting-control">
-                        <input type="range" id="masterVolume" min="0" max="100" value="70">
-                        <span class="volume-value" id="volumeValue">70%</span>
-                    </div>
-                </div>
                 <div class="setting-item">
                     <label>🎵 Music Volume</label>
                     <div class="setting-control">
@@ -92,9 +56,48 @@
                     </div>
                 </div>
                 <div class="setting-item">
-                    <label>🎵 Background Music</label>
+                    <label>⌨️ Keybinds</label>
+                    <div class="keybind-section">
+                        <div class="keybind-item">
+                            <label>Move Left:</label>
+                            <input type="text" class="keybind-input" id="keybindMoveLeft" maxlength="1" readonly>
+                        </div>
+                        <div class="keybind-item">
+                            <label>Move Right:</label>
+                            <input type="text" class="keybind-input" id="keybindMoveRight" maxlength="1" readonly>
+                        </div>
+                        <div class="keybind-item">
+                            <label>Jump:</label>
+                            <input type="text" class="keybind-input" id="keybindJump" maxlength="10" readonly>
+                        </div>
+                        <div class="keybind-item">
+                            <label>Crouch:</label>
+                            <input type="text" class="keybind-input" id="keybindCrouch" maxlength="10" readonly>
+                        </div>
+                        <div class="keybind-item">
+                            <label>Climb:</label>
+                            <input type="text" class="keybind-input" id="keybindClimb" maxlength="1" readonly>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>✨ Enable Particles</label>
                     <div class="setting-control">
-                        <div class="toggle-switch on" id="musicToggle"></div>
+                        <div class="toggle-switch" id="enableParticlesToggle"></div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>🔢 Max Particles</label>
+                    <div class="setting-control">
+                        <input type="range" id="maxParticles" min="50" max="300" step="10" value="50">
+                        <span class="volume-value" id="maxParticlesValue">50</span>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>⏱️ Particle Duration</label>
+                    <div class="setting-control">
+                        <input type="range" id="particleDuration" min="0.1" max="3.0" step="0.1" value="3.0">
+                        <span class="volume-value" id="particleDurationValue">3.0x</span>
                     </div>
                 </div>
                 <div class="panel-buttons">
@@ -113,16 +116,27 @@
     <!-- Game Screen -->
     <div id="gameScreen" class="game-screen" style="display: none;">
         <div id="ui">Room: <span id="currentRoomName">-</span> | Players: <span id="pc">1</span></div>
-        <div id="info">Players: <span id="pc2">1</span><br>Use A/D or ←/→ to move, W or ↑ to jump (hold W on a wall to climb)</div>
+        <div id="leaderboard">
+            <div class="leaderboard-title">LEADERBOARD</div>
+            <div id="leaderboardContent"></div>
+        </div>
         <div id="activeUps"></div>
         <div id="cooldownBar">
             <div id="cooldownLabel">MANA CHARGE</div>
             <div id="cooldownFill"></div>
         </div>
         <button id="leaveGameBtn" class="leave-btn">← LEAVE GAME</button>
-        <button id="unstuckBtn" class="unstuck-btn">UNSTUCK</button>
         <audio id="battleMusic" loop>
             <source src="assets/ws1battle.mp3" type="audio/mpeg">
+        </audio>
+        <audio id="cloudsMusic" loop>
+            <source src="assets/ws1cloudstheme.mp3" type="audio/mpeg">
+        </audio>
+        <audio id="spaceMusic" loop>
+            <source src="assets/ws1spacetheme.mp3" type="audio/mpeg">
+        </audio>
+        <audio id="lavaMusic" loop>
+            <source src="assets/ws1lavatheme.mp3" type="audio/mpeg">
         </audio>
     </div>
 
