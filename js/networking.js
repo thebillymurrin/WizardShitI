@@ -1,4 +1,4 @@
-/* Networking and Multiplayer */
+/* Networking and Multiplayer with PeerJS */
 
 import { sanitize, initSeededRandom } from './utils.js';
 import { buildLevel } from './physics.js';
@@ -6,42 +6,60 @@ import { addPlayer, findSafeSpawnLocation } from './player.js';
 import { COLLISION_FILTERS, PLAYER_CFG, PR, POWERUP_TYPES, POWERUP_CATEGORY } from './config.js';
 
 export function startNetworking(roomName, world, players, ui, info, pc, gameState, levelBuiltRef, levelSeedRef, seededRandomRef, isHostRef, schedulePickupSpawns) {
-    // Wait for Trystero to load
-    if (!window.trystero) {
-        setTimeout(() => startNetworking(roomName, world, players, ui, info, pc, gameState, levelBuiltRef, levelSeedRef, seededRandomRef, isHostRef, schedulePickupSpawns), 100);
-        return;
-    }
+    // Wait for PeerJS to load
+    const checkPeerJS = () => {
+        // PeerJS should be available as Peer in global scope when loaded via script tag
+        let PeerJS = null;
+        
+        // Check various ways PeerJS might be exposed
+        if (typeof Peer !== 'undefined') {
+            PeerJS = Peer;
+        } else if (window.Peer) {
+            PeerJS = window.Peer;
+        } else if (typeof globalThis !== 'undefined' && globalThis.Peer) {
+            PeerJS = globalThis.Peer;
+        }
+        
+        if (!PeerJS) {
+            console.log('Waiting for PeerJS to load...');
+            setTimeout(checkPeerJS, 100);
+            return;
+        }
+        
+        console.log('✓ PeerJS available, starting networking...');
+        initializeNetworking(roomName, world, players, ui, info, pc, gameState, levelBuiltRef, levelSeedRef, seededRandomRef, isHostRef, schedulePickupSpawns, PeerJS);
+    };
+    
+    checkPeerJS();
+}
+
+function initializeNetworking(roomName, world, players, ui, info, pc, gameState, levelBuiltRef, levelSeedRef, seededRandomRef, isHostRef, schedulePickupSpawns, PeerJS) {
     
     const safe = sanitize(roomName);
     console.log(`Room name: "${roomName}" → sanitized: "${safe}"`);
     
     // Use room name as seed for deterministic level generation
-    // Improved hash function for better seed distribution
     let seed = 0;
     for (let i = 0; i < safe.length; i++) {
         const char = safe.charCodeAt(i);
         seed = ((seed << 5) - seed) + char;
-        // Mix bits for better distribution
         seed = seed + (seed << 15);
         seed = seed ^ (seed >> 7);
     }
-    // Add room name length to ensure different lengths produce different seeds
     seed = Math.abs(seed) + (safe.length * 73856093);
-    seed = seed || 1; // Ensure seed is never 0
+    seed = seed || 1;
     
     // Rebuild level if seed changed
     if (levelSeedRef.current !== seed) {
-        // Clear ALL bodies from world (including players, orbs, pickups, etc.)
         const allBodies = [...world.bodies];
         allBodies.forEach(body => Matter.World.remove(world, body));
         
-        // Clear players array
         const playerIds = Object.keys(players);
         playerIds.forEach(id => {
             delete players[id];
         });
         
-        // Detect theme from room name (case-insensitive)
+        // Detect theme from room name
         let theme = 'default';
         const roomLower = safe.toLowerCase();
         if (roomLower.includes('clouds')) {
@@ -52,316 +70,403 @@ export function startNetworking(roomName, world, players, ui, info, pc, gameStat
             theme = 'space';
         }
         
-        // Reset seed and build level
         levelSeedRef.current = seed;
         seededRandomRef.current = initSeededRandom(seed);
         buildLevel(world, seededRandomRef.current, theme);
         levelBuiltRef.current = true;
-        
-        // Store theme in gameState for graphics to use
         gameState.theme = theme;
     }
     
-    // Join room with Trystero
-    // Note: Trystero uses Firebase for signaling by default, which should work over the internet
-    // If multiplayer only works locally, check:
-    // 1. Firewall settings (allow WebRTC ports UDP 3478, 5349, 49152-65535)
-    // 2. NAT type (strict NAT may prevent connections)
-    // 3. Browser console for WebRTC connection errors
-    try {
-        gameState.room = window.trystero.joinRoom({ appId: 'wizard-game' }, safe);
-        gameState.myId = Math.random().toString(36).substr(2, 9);
-        
-        console.log(`✓ Joining room: ${safe}`);
-        console.log(`✓ My ID: ${gameState.myId}`);
-        
-        // Log room info for debugging
-        if (gameState.room) {
-            console.log('✓ Room created successfully');
-        }
-    } catch (error) {
-        console.error('✗ Failed to join room:', error);
-        alert('Failed to connect to multiplayer room. Check console for details.');
-        return;
-    }
+    // Generate temporary ID (will be replaced by PeerJS when connected)
+    // Don't set gameState.myId here - it will be set when PeerJS connects
     
-    // Setup message channels (names must be ≤12 bytes)
-    const [sendState, receiveState] = gameState.room.makeAction('state');
-    const [sendOrb, receiveOrb] = gameState.room.makeAction('orb');
-    const [sendPickup, receivePickup] = gameState.room.makeAction('pickup');
-    const [sendPickupCollected, receivePickupCollected] = gameState.room.makeAction('pickupCol');
-    const [sendJoin, receiveJoin] = gameState.room.makeAction('join');
-    const [sendVoxelDamage, receiveVoxelDamage] = gameState.room.makeAction('voxelDmg');
+    // Create room ID from sanitized room name (this will be the host peer ID)
+    // For room-based connections, we'll use the room name as the host peer ID
+    const roomId = safe.toLowerCase().substring(0, 20); // PeerJS peer IDs are limited length
     
-    // Get player name from input or use default (convert to uppercase)
-    const playerNameInput = document.getElementById('playerNameInput');
-    const playerName = (playerNameInput && playerNameInput.value.trim().toUpperCase()) || `Player${gameState.myId.substring(0, 4).toUpperCase()}`;
+    // Initialize PeerJS with public server and proper STUN/TURN configuration
+    const peerConfig = {
+        host: '0.peerjs.com',
+        port: 443,
+        path: '/',
+        secure: true,
+        config: {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' }
+            ]
+        },
+        debug: 2
+    };
     
-    // Add local player
-    const spawn = findSafeSpawnLocation(world, players);
-    addPlayer(world, players, pc, gameState.myId, spawn.x, spawn.y, null, playerName);
+    console.log(`✓ Initializing PeerJS with room ID: ${roomId}`);
+    
+    // Create peer - first attempt to be host (using room name as peer ID)
+    let peer = new PeerJS(roomId, peerConfig);
+    let isHost = true;
+    let hostPeerId = roomId;
+    
+    gameState.peer = peer;
+    gameState.isHost = isHost;
+    gameState.roomId = roomId;
+    gameState.connections = {};
     
     // Update player count display
     const updatePlayerCount = () => {
         try {
-            if (gameState.room && pc) {
-                const peers = gameState.room.getPeers();
-                const peerCount = (peers && Array.isArray(peers)) ? peers.length : 0;
+            if (pc) {
                 const totalPlayers = Object.keys(players).length;
-                pc.textContent = Math.max(totalPlayers, peerCount + 1);
-                console.log(`Player count updated: ${pc.textContent} (peers: ${peerCount}, local players: ${totalPlayers})`);
+                pc.textContent = totalPlayers;
             }
         } catch (e) {
             console.warn('Failed to update player count:', e);
         }
     };
     
-    // Initial player count update
-    updatePlayerCount();
-    
-    // Show UI elements (leaderboard replaces info)
-    if (ui) ui.style.display = 'block';
-    const leaderboard = document.getElementById('leaderboard');
-    if (leaderboard) leaderboard.style.display = 'block';
-    
-    // Handle peer joining
-    gameState.room.onPeerJoin(peerId => {
-        console.log(`✓ Peer joined: ${peerId}`);
-        updatePlayerCount();
+    // Function to connect to host
+    const connectToHost = (hostId) => {
+        if (!hostId || !peer) return;
         
-        // Send our player info to new peer
-        const p = players[gameState.myId];
-        if (p) {
-            console.log(`Sending join message to new peer ${peerId}`);
-            sendJoin({
-                id: gameState.myId,
-                x: p.body.position.x,
-                y: p.body.position.y,
-                color: p.color,
-                name: p.name,
-                seed: levelSeedRef.current
-            }, peerId);
-        }
-    });
-    
-    // Handle peer leaving
-    gameState.room.onPeerLeave(peerId => {
-        console.log(`✗ Peer left: ${peerId}`);
-        if (players[peerId]) {
-            Matter.World.remove(world, players[peerId].body);
-            delete players[peerId];
-        }
-        updatePlayerCount();
+        console.log(`Connecting to host: ${hostId}`);
+        const conn = peer.connect(hostId, {
+            reliable: true
+        });
         
-        // Handle host migration if host leaves
-        const remainingPeers = gameState.room.getPeers();
-        if (remainingPeers.length === 0 && !isHostRef.current && schedulePickupSpawns) {
-            isHostRef.current = true;
-            setTimeout(() => {
-                schedulePickupSpawns();
-            }, 500);
+        if (!conn) {
+            console.error('Failed to create connection');
+            return;
         }
-    });
+        
+        setupConnection(conn, hostId);
+    };
     
-    // Check for existing peers periodically and send join message if needed
-    // This ensures we connect to peers who joined before us
-    const checkExistingPeers = () => {
-        try {
-            if (!gameState.room) {
-                setTimeout(checkExistingPeers, 500);
-                return;
+    // Track which connections are open
+    const openConnections = new Set();
+    
+    // Send message to a specific peer
+    const sendMessage = (peerId, message) => {
+        if (peerId && gameState.connections[peerId] && openConnections.has(peerId)) {
+            try {
+                gameState.connections[peerId].send(message);
+            } catch (e) {
+                // Silently handle connection errors (connection might be closing)
+                if (!e.message || !e.message.includes('not open')) {
+                    console.error(`Failed to send message to ${peerId}:`, e);
+                }
             }
+        }
+    };
+    
+    // Broadcast message to all peers
+    const broadcastMessage = (message) => {
+        openConnections.forEach(peerId => {
+            sendMessage(peerId, message);
+        });
+    };
+    
+    // Setup connection handlers
+    const setupConnection = (conn, peerId) => {
+        if (gameState.connections[peerId]) {
+            console.log(`Connection to ${peerId} already exists`);
+            return;
+        }
+        
+        gameState.connections[peerId] = conn;
+        
+        conn.on('open', () => {
+            console.log(`✓ Connection opened with ${peerId}`);
+            openConnections.add(peerId);
             
-            const existingPeers = gameState.room.getPeers();
+            // Send join message
             const p = players[gameState.myId];
-            
-            if (p && existingPeers && existingPeers.length > 0) {
-                console.log(`Found ${existingPeers.length} existing peer(s), sending join messages...`);
-                existingPeers.forEach(peerId => {
-                    // Send join message to existing peers
-                    sendJoin({
+            if (p) {
+                sendMessage(peerId, {
+                    type: 'join',
+                    data: {
                         id: gameState.myId,
                         x: p.body.position.x,
                         y: p.body.position.y,
                         color: p.color,
                         name: p.name,
                         seed: levelSeedRef.current
-                    }, peerId);
+                    }
                 });
             }
             
             updatePlayerCount();
-        } catch (e) {
-            console.warn('Error checking existing peers:', e);
+        });
+        
+        conn.on('data', (data) => {
+            handleMessage(data, peerId);
+        });
+        
+        conn.on('close', () => {
+            console.log(`✗ Connection closed with ${peerId}`);
+            openConnections.delete(peerId);
+            delete gameState.connections[peerId];
+            
+            if (players[peerId]) {
+                Matter.World.remove(world, players[peerId].body);
+                delete players[peerId];
+            }
+            
+            updatePlayerCount();
+        });
+        
+        conn.on('error', (err) => {
+            // If connection fails or closes, remove from open set
+            if (err.type === 'connection-closed' || err.message?.includes('not open')) {
+                openConnections.delete(peerId);
+            }
+            // Only log non-trivial errors
+            if (!err.message || (!err.message.includes('not open') && !err.message.includes('closed'))) {
+                console.error(`Connection error with ${peerId}:`, err);
+            }
+        });
+    };
+    
+    // Get player name (get it early, but don't use myId yet)
+    const playerNameInput = document.getElementById('playerNameInput');
+    const defaultPlayerName = 'PLAYER';
+    
+    // Handle peer connection open
+    peer.on('open', (id) => {
+        console.log(`✓ PeerJS connected. My ID: ${id}`);
+        gameState.myId = id;
+        
+        // NOW add the local player with the correct ID
+        const playerName = (playerNameInput && playerNameInput.value.trim().toUpperCase()) || `Player${id.substring(0, 4).toUpperCase()}`;
+        const spawn = findSafeSpawnLocation(world, players);
+        addPlayer(world, players, pc, gameState.myId, spawn.x, spawn.y, null, playerName);
+        console.log(`✓ Added local player with ID: ${gameState.myId}`);
+        updatePlayerCount();
+        
+        if (isHost) {
+            console.log(`✓ Hosting room: ${roomId}`);
+            // Host is ready, wait for clients to connect
+            isHostRef.current = true;
+            if (schedulePickupSpawns) {
+                setTimeout(() => {
+                    schedulePickupSpawns();
+                }, 1000);
+            }
+        }
+    });
+    
+    // Handle peer connection errors
+    peer.on('error', (err) => {
+        console.error('PeerJS error:', err);
+        
+        if (err.type === 'unavailable-id') {
+            // Room ID already taken, connect as client with random ID
+            console.log('Room ID taken, connecting as client...');
+            peer.destroy();
+            peer = new PeerJS(peerConfig);
+            gameState.peer = peer;
+            isHost = false;
+            gameState.isHost = false;
+            
+            peer.on('open', (id) => {
+                gameState.myId = id;
+                console.log(`✓ Connected as client with ID: ${id}`);
+                
+                // Add the local player with the correct ID
+                const playerName = (playerNameInput && playerNameInput.value.trim().toUpperCase()) || `Player${id.substring(0, 4).toUpperCase()}`;
+                const spawn = findSafeSpawnLocation(world, players);
+                addPlayer(world, players, pc, gameState.myId, spawn.x, spawn.y, null, playerName);
+                console.log(`✓ Added local player with ID: ${gameState.myId}`);
+                updatePlayerCount();
+                
+                // Try to connect to host
+                setTimeout(() => {
+                    connectToHost(hostPeerId);
+                }, 500);
+            });
+            
+            peer.on('connection', (conn) => {
+                console.log(`✓ Incoming connection from: ${conn.peer}`);
+                setupConnection(conn, conn.peer);
+            });
+        }
+    });
+    
+    // Handle incoming connections (for host)
+    peer.on('connection', (conn) => {
+        console.log(`✓ Incoming connection from: ${conn.peer}`);
+        setupConnection(conn, conn.peer);
+    });
+    
+    // Show UI elements (player will be added when PeerJS connects)
+    if (ui) ui.style.display = 'block';
+    const leaderboard = document.getElementById('leaderboard');
+    if (leaderboard) leaderboard.style.display = 'block';
+    
+    // Handle messages
+    const handleMessage = (message, peerId) => {
+        if (!message || !message.type) return;
+        
+        switch (message.type) {
+            case 'join':
+                const joinData = message.data;
+                console.log(`✓ Received join from ${peerId}:`, joinData);
+                if (joinData.id !== gameState.myId && !players[joinData.id]) {
+                    addPlayer(world, players, pc, joinData.id, joinData.x, joinData.y, joinData.color, joinData.name);
+                    console.log(`✓ Added remote player: ${joinData.name || joinData.id}`);
+                    
+                    // Send our join message back
+                    const p = players[gameState.myId];
+                    if (p) {
+                        sendMessage(peerId, {
+                            type: 'join',
+                            data: {
+                                id: gameState.myId,
+                                x: p.body.position.x,
+                                y: p.body.position.y,
+                                color: p.color,
+                                name: p.name,
+                                seed: levelSeedRef.current
+                            }
+                        });
+                    }
+                    
+                    updatePlayerCount();
+                }
+                break;
+                
+            case 'state':
+                const stateData = message.data;
+                if (stateData.id !== gameState.myId) {
+                    if (!players[stateData.id]) {
+                        console.log(`Received state from new player: ${stateData.id}`);
+                        addPlayer(world, players, pc, stateData.id, stateData.x, stateData.y, stateData.color, stateData.name);
+                        updatePlayerCount();
+                    }
+                    const p = players[stateData.id];
+                    if (!p) return;
+                    
+                    Matter.Body.setPosition(p.body, { x: stateData.x, y: stateData.y });
+                    Matter.Body.setVelocity(p.body, { x: stateData.vx, y: stateData.vy });
+                    p.dir = stateData.dir;
+                    p.ang = stateData.ang;
+                    if (stateData.health !== undefined) p.health = stateData.health;
+                    if (stateData.name !== undefined) p.name = stateData.name;
+                    if (stateData.kills !== undefined) p.kills = stateData.kills;
+                    if (stateData.deaths !== undefined) p.deaths = stateData.deaths;
+                    
+                    // Sync crouch state
+                    if (stateData.isCrouching !== undefined) {
+                        const wasCrouching = p.isCrouching;
+                        p.isCrouching = !!stateData.isCrouching;
+                        
+                        if (wasCrouching !== p.isCrouching) {
+                            if (!p.originalRadius) p.originalRadius = PR;
+                            if (p.currentScale === undefined) p.currentScale = 1.0;
+                            
+                            const crouchScale = 0.7;
+                            if (p.isCrouching) {
+                                const scaleFactor = crouchScale / p.currentScale;
+                                Matter.Body.scale(p.body, scaleFactor, scaleFactor);
+                                p.currentScale = crouchScale;
+                            } else {
+                                const scaleFactor = 1.0 / p.currentScale;
+                                Matter.Body.scale(p.body, scaleFactor, scaleFactor);
+                                p.currentScale = 1.0;
+                            }
+                        }
+                    }
+                }
+                break;
+                
+            case 'orb':
+                if (window.receiveOrbHandler) {
+                    window.receiveOrbHandler(message.data, peerId);
+                }
+                break;
+                
+            case 'pickup':
+                if (window.receivePickupHandler) {
+                    window.receivePickupHandler(message.data, peerId);
+                }
+                break;
+                
+            case 'pickupCollected':
+                if (window.receivePickupCollectedHandler) {
+                    window.receivePickupCollectedHandler(message.data, peerId);
+                }
+                break;
+                
+            case 'voxelDmg':
+                if (window.receiveVoxelDamageHandler) {
+                    window.receiveVoxelDamageHandler(message.data, peerId);
+                }
+                break;
         }
     };
     
-    // Check for existing peers after a short delay (allow room to initialize)
-    setTimeout(checkExistingPeers, 1000);
-    setTimeout(checkExistingPeers, 3000);
-    setTimeout(checkExistingPeers, 5000);
+    // Store broadcast functions globally
+    window.broadcastState = (data) => {
+        broadcastMessage({
+            type: 'state',
+            data: data
+        });
+    };
     
-    // Receive join messages
-    receiveJoin((data, peerId) => {
-        console.log(`✓ Received join from peer ${peerId}:`, data);
-        if (data.id !== gameState.myId && !players[data.id]) {
-            addPlayer(world, players, pc, data.id, data.x, data.y, data.color, data.name);
-            console.log(`✓ Added remote player: ${data.name || data.id}`);
-            updatePlayerCount();
-        } else if (players[data.id]) {
-            console.log(`Player ${data.id} already exists, skipping`);
-        }
-    });
+    window.broadcastOrb = (data) => {
+        broadcastMessage({
+            type: 'orb',
+            data: data
+        });
+    };
     
-    // Receive state updates
-    receiveState((data, peerId) => {
-        if (data.id !== gameState.myId) {
-            if (!players[data.id]) {
-                console.log(`Received state from new player: ${data.id} (peer: ${peerId})`);
-                addPlayer(world, players, pc, data.id, data.x, data.y, data.color, data.name);
-                updatePlayerCount();
-            }
-            const p = players[data.id];
-            if (!p) {
-                console.warn(`Received state for unknown player: ${data.id}`);
-                return;
-            }
-            Matter.Body.setPosition(p.body, { x: data.x, y: data.y });
-            Matter.Body.setVelocity(p.body, { x: data.vx, y: data.vy });
-            p.dir = data.dir;
-            p.ang = data.ang;
-            if (data.health !== undefined) p.health = data.health;
-            if (data.name !== undefined) p.name = data.name;
-            if (data.kills !== undefined) p.kills = data.kills;
-            if (data.deaths !== undefined) p.deaths = data.deaths;
-            
-            // Sync crouch state and update hitbox
-            if (data.isCrouching !== undefined) {
-                const wasCrouching = p.isCrouching;
-                p.isCrouching = !!data.isCrouching;
-                
-                // Update hitbox when crouch state changes
-                if (wasCrouching !== p.isCrouching) {
-                    // Store original radius if not already stored
-                    if (!p.originalRadius) {
-                        p.originalRadius = PR;
-                    }
-                    
-                    // Track current scale factor
-                    if (p.currentScale === undefined) {
-                        p.currentScale = 1.0;
-                    }
-                    
-                    // Scale body down when crouching, restore when standing
-                    const crouchScale = 0.7; // Reduce hitbox to 70% when crouching
-                    if (p.isCrouching) {
-                        // Scale down the body (this keeps center at same position)
-                        const scaleFactor = crouchScale / p.currentScale;
-                        Matter.Body.scale(p.body, scaleFactor, scaleFactor);
-                        p.currentScale = crouchScale;
-                    } else {
-                        // Scale back up to original size
-                        const scaleFactor = 1.0 / p.currentScale;
-                        Matter.Body.scale(p.body, scaleFactor, scaleFactor);
-                        p.currentScale = 1.0;
-                    }
-                }
-            }
-        }
-    });
+    window.broadcastPickup = (data) => {
+        broadcastMessage({
+            type: 'pickup',
+            data: data
+        });
+    };
     
-    // Receive orbs
-    receiveOrb((data, peerId) => {
-        if (window.receiveOrbHandler) {
-            window.receiveOrbHandler(data, peerId);
-        }
-    });
+    window.broadcastPickupCollected = (data) => {
+        broadcastMessage({
+            type: 'pickupCollected',
+            data: data
+        });
+    };
     
-    // Receive pickups
-    receivePickup((data, peerId) => {
-        if (window.receivePickupHandler) {
-            window.receivePickupHandler(data, peerId);
-        }
-    });
+    window.broadcastVoxelDamage = (data) => {
+        broadcastMessage({
+            type: 'voxelDmg',
+            data: data
+        });
+    };
     
-    // Receive pickup collected
-    receivePickupCollected((data, peerId) => {
-        if (window.receivePickupCollectedHandler) {
-            window.receivePickupCollectedHandler(data, peerId);
-        }
-    });
-    
-    // Receive voxel damage
-    receiveVoxelDamage((data, peerId) => {
-        if (window.receiveVoxelDamageHandler) {
-            window.receiveVoxelDamageHandler(data, peerId);
-        }
-    });
-    
-    // Store send functions globally for other modules
-    window.broadcastState = sendState;
-    window.broadcastOrb = sendOrb;
-    window.broadcastPickup = sendPickup;
-    window.broadcastPickupCollected = sendPickupCollected;
-    window.broadcastVoxelDamage = sendVoxelDamage;
-    
-    // Determine host status - always be host if we can't determine peers (solo play)
-    const startPickupSpawning = () => {
-        if (isHostRef.current) return;
-        
+    // Host status
+    if (isHost) {
         isHostRef.current = true;
-        
         if (schedulePickupSpawns) {
             setTimeout(() => {
                 schedulePickupSpawns();
             }, 1000);
         }
-    };
-    
-    // Check host status after room is initialized
-    const checkHostStatus = () => {
-        try {
-            if (!gameState.room) {
-                setTimeout(checkHostStatus, 500);
-                return;
+    } else {
+        // Check if we should become host if no connections
+        setTimeout(() => {
+            if (Object.keys(gameState.connections).length === 0 && !isHostRef.current && schedulePickupSpawns) {
+                isHostRef.current = true;
+                setTimeout(() => {
+                    schedulePickupSpawns();
+                }, 500);
             }
-            
-            const peers = gameState.room.getPeers();
-            const peerCount = (peers && Array.isArray(peers)) ? peers.length : 0;
-            
-            if (peerCount === 0 && !isHostRef.current) {
-                startPickupSpawning();
-            }
-        } catch (e) {
-            // If we can't determine, assume host for solo play
-            if (!isHostRef.current) {
-                startPickupSpawning();
-            }
-        }
-    };
+        }, 3000);
+    }
     
-    // Check immediately and after delays to catch async initialization
-    setTimeout(checkHostStatus, 300);
-    setTimeout(checkHostStatus, 1000);
-    setTimeout(checkHostStatus, 2000);
-    
-    // Log peer count periodically for debugging (less verbose)
-    let lastPeerCount = -1;
+    // Periodic connection check
     setInterval(() => {
-        try {
-            if (gameState.room) {
-                const peers = gameState.room.getPeers();
-                const peerCount = (peers && Array.isArray(peers)) ? peers.length : 0;
-                // Only log if peer count changes
-                if (peerCount !== lastPeerCount) {
-                    lastPeerCount = peerCount;
-                    console.log(`Peer status: ${peerCount} peer(s) connected, ${Object.keys(players).length} total player(s)`);
-                    updatePlayerCount();
-                }
-            }
-        } catch (e) {
-            // Ignore errors
-        }
+        const connectionCount = Object.keys(gameState.connections).length;
+        const playerCount = Object.keys(players).length;
+        console.log(`Connection status: ${connectionCount} connection(s), ${playerCount} total player(s)`);
+        updatePlayerCount();
     }, 5000);
 }
-
